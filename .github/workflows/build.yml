@@ -1,0 +1,45 @@
+name: APK bauen
+
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Tests
+        run: ./gradlew testReleaseUnitTest --stacktrace
+
+      - name: APK bauen
+        run: ./gradlew assembleRelease --stacktrace
+
+      - name: APK umbenennen
+        run: cp app/build/outputs/apk/release/app-release.apk Produktivitaet.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Produktivitaet-APK
+          path: Produktivitaet.apk
+
+      - name: Download-Seite aktualisieren
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete neueste-version --cleanup-tag --yes || true
+          gh release create neueste-version Produktivitaet.apk \
+            --target "$GITHUB_SHA" \
+            --title "Produktivität – neueste Version" \
+            --notes "Automatisch gebaut aus ${GITHUB_REF_NAME} (${GITHUB_SHA::7}). Produktivitaet.apk auf dem Handy herunterladen und öffnen, um die App zu installieren oder zu aktualisieren."
