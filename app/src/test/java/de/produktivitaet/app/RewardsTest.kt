@@ -37,3 +37,27 @@ class RewardsTest {
         assertTrue(counts[3] > counts[4] && counts[4] > counts[5])
     }
 }
+
+class DecorRulesTest {
+    @Test
+    fun overlapIsShareOfFirstRect() {
+        val mushroom = floatArrayOf(0f, 0f, 10f, 10f)
+        assertEquals(1f, overlapFraction(mushroom, floatArrayOf(-5f, -5f, 20f, 20f)), 0.001f)
+        assertEquals(0.5f, overlapFraction(mushroom, floatArrayOf(5f, 0f, 30f, 10f)), 0.001f)
+        assertEquals(0f, overlapFraction(mushroom, floatArrayOf(20f, 20f, 30f, 30f)), 0.001f)
+    }
+
+    @Test
+    fun sizesGrowFromButtonSizeToHalfTheScreen() {
+        assertEquals(64f, mushroomHeightDp(1, 800f), 0.01f)
+        assertEquals(440f, mushroomHeightDp(5, 800f), 0.01f)
+        assertTrue((1..4).all { mushroomHeightDp(it, 800f) < mushroomHeightDp(it + 1, 800f) })
+    }
+
+    @Test
+    fun cardKeysBecomeTaskAndTemplateAnchors() {
+        assertEquals(Anchor.OnTask(7), anchorForArea("overview", taskKey(7)))
+        assertEquals(Anchor.OnTemplate(3), anchorForArea("add", templateKey(3)))
+        assertEquals(Anchor.Area("home", "plus"), anchorForArea("home", "plus"))
+    }
+}

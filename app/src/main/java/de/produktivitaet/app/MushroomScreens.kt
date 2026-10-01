@@ -8,6 +8,8 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -25,6 +27,12 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -38,17 +46,19 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import kotlinx.coroutines.delay
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.exp
@@ -58,11 +68,31 @@ import kotlin.random.Random
 @Composable
 fun FungariumScreen(vm: MainViewModel) {
     val store = vm.store
-    val counts = store.mushrooms.groupingBy { it.species }.eachCount()
-    val found = vm.catalog.species.count { (counts[it.id] ?: 0) > 0 }
+    val earned = store.mushrooms.groupingBy { it.species }.eachCount()
+    val found = vm.catalog.species.count { (earned[it.id] ?: 0) > 0 }
+    var confirmReset by remember { mutableStateOf(false) }
 
     Column(Modifier.fillMaxSize()) {
-        TopBar("Fungarium", vm::back)
+        TopBar("Fungarium", vm::back) {
+            // Schalter: welche Größe beim Herausnehmen zuerst kommt.
+            Box(
+                Modifier
+                    .clip(CircleShape)
+                    .border(1.dp, White, CircleShape)
+                    .clickable { store.toggleBigFirst() }
+                    .padding(horizontal = 12.dp, vertical = 7.dp),
+            ) {
+                Text(if (store.bigFirst) "Große zuerst" else "Kleine zuerst", fontSize = 13.sp)
+            }
+            if (vm.decorMode) {
+                IconButton(onClick = {
+                    vm.exitDecorMode()
+                    vm.back()
+                }) { Icon(Icons.Filled.Check, "Fertig", tint = White) }
+            } else {
+                IconButton(onClick = vm::enterDecorMode) { Icon(Icons.Filled.Edit, "Pilz-Modus", tint = White) }
+            }
+        }
         LazyVerticalGrid(
             columns = GridCells.Fixed(3),
             contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp),
@@ -72,40 +102,82 @@ fun FungariumScreen(vm: MainViewModel) {
             item(span = { GridItemSpan(maxLineSpan) }) {
                 NextMushroomHeader(vm)
             }
+            if (vm.decorMode) {
+                item(span = { GridItemSpan(maxLineSpan) }) {
+                    Text(
+                        "Pilz-Modus: Tippe einen Pilz an, um ihn ins Fenster zu setzen. Mit ✓ beendest du den Modus.",
+                        fontSize = 14.sp,
+                        color = White,
+                    )
+                }
+            }
             item(span = { GridItemSpan(maxLineSpan) }) {
                 Text(
                     "$found von ${vm.catalog.species.size} Pilzarten gefunden",
                     color = Muted,
                     fontSize = 15.sp,
-                    modifier = Modifier.padding(top = 8.dp),
+                    modifier = Modifier.padding(top = 4.dp),
                 )
             }
             items(vm.catalog.species, key = { it.id }) { species ->
-                val count = counts[species.id] ?: 0
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                val total = earned[species.id] ?: 0
+                val available = store.availableCount(species.id)
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier
+                        .clip(CardShape)
+                        .clickable(enabled = available > 0) { vm.pickFromFungarium(species.id) },
+                ) {
                     Box(
                         Modifier
                             .fillMaxWidth()
                             .aspectRatio(1f)
-                            .border(1.dp, if (count > 0) Muted else Dim, CardShape)
+                            .border(1.dp, if (available > 0) Muted else Dim, CardShape)
                             .padding(10.dp),
                         contentAlignment = Alignment.Center,
                     ) {
-                        MushroomImage(vm.catalog, species.id, Modifier.fillMaxSize(), silhouette = count == 0)
+                        MushroomImage(
+                            vm.catalog,
+                            species.id,
+                            Modifier.fillMaxSize().alpha(if (total > 0 && available == 0) 0.35f else 1f),
+                            silhouette = total == 0,
+                        )
                     }
                     Spacer(Modifier.height(6.dp))
                     Text(
-                        if (count > 0) species.name else "???",
+                        if (total > 0) species.name else "???",
                         fontSize = 13.sp,
                         lineHeight = 16.sp,
                         textAlign = TextAlign.Center,
-                        color = if (count > 0) White else Dim,
+                        color = if (total > 0) White else Dim,
                         maxLines = 2,
                     )
-                    if (count > 0) Text("× $count", fontSize = 13.sp, color = Muted)
+                    if (total > 0) Text("× $available", fontSize = 13.sp, color = Muted)
+                }
+            }
+            if (store.placements.isNotEmpty()) {
+                item(span = { GridItemSpan(maxLineSpan) }) {
+                    OutlineButton(
+                        "Alles zurücksetzen",
+                        { confirmReset = true },
+                        Modifier.fillMaxWidth().padding(top = 12.dp),
+                    )
                 }
             }
         }
+    }
+
+    if (confirmReset) {
+        ConfirmDialog(
+            title = "Alles zurücksetzen?",
+            text = "Alle Pilze werden aus allen Fenstern, Aufgaben und Vorlagen entfernt und kommen zurück ins Fungarium.",
+            confirmText = "Zurücksetzen",
+            onConfirm = {
+                vm.resetAllDecor()
+                confirmReset = false
+            },
+            onDismiss = { confirmReset = false },
+        )
     }
 }
 
@@ -166,15 +238,20 @@ private fun burst(startNanos: Long, origin: Offset, density: Float, count: Int):
     })
 }
 
-/** Nach dem Erledigen: bunte Sporen, nächster Pilz als Silhouette, animierter Fortschrittsbalken. */
+/**
+ * Nach dem Erledigen, in Etappen per Antippen:
+ * Balken füllt sich (Sporen) → [Tippen] neuer Pilz wird gezeigt (Sporen) → [Tippen] Balken zum nächsten Pilz → …
+ * → [Tippen] schließen. Ohne neuen Pilz schließt das erste Tippen.
+ */
 @Composable
 fun CelebrationScreen(vm: MainViewModel, reward: Reward) {
-    val density = androidx.compose.ui.platform.LocalDensity.current.density
+    val density = LocalDensity.current.density
     val startCount = remember { Rewards.mushroomsFor(reward.startTotal) }
+    val lastStage = 2 * reward.earned.size
+    // Gerade Etappe 2k: Balken für den k-ten Abschnitt. Ungerade 2k+1: Enthüllung des k-ten neuen Pilzes.
+    var stage by remember { mutableIntStateOf(0) }
     val progress = remember { Animatable(reward.startTotal.toFloat()) }
     val popScale = remember { Animatable(1f) }
-    var revealed by remember { mutableIntStateOf(0) }
-    var revealing by remember { mutableStateOf(false) }
     var now by remember { mutableLongStateOf(0L) }
     val bursts = remember { mutableStateListOf<Burst>() }
     var containerOffset by remember { mutableStateOf(Offset.Zero) }
@@ -186,35 +263,39 @@ fun CelebrationScreen(vm: MainViewModel, reward: Reward) {
         while (true) withFrameNanos { now = it }
     }
 
-    LaunchedEffect(Unit) {
-        withFrameNanos { bursts.add(burst(it, origin(), density, 70)) }
-        delay(500)
-        reward.earned.forEachIndexed { i, _ ->
-            val target = Rewards.threshold(startCount + i + 1).toFloat()
+    LaunchedEffect(stage) {
+        val k = stage / 2
+        if (stage % 2 == 0) {
+            if (k == 0) {
+                withFrameNanos { bursts.add(burst(it, origin(), density, 70)) }
+            } else {
+                progress.snapTo(Rewards.threshold(startCount + k).toFloat())
+            }
+            val target = minOf(reward.endTotal, Rewards.threshold(startCount + k + 1)).toFloat()
             progress.animateTo(target, tween(durationFor(target - progress.value), easing = FastOutSlowInEasing))
-            revealing = true
+        } else {
+            progress.snapTo(Rewards.threshold(startCount + k + 1).toFloat())
             withFrameNanos { bursts.add(burst(it, origin(), density, 110)) }
             popScale.snapTo(0.55f)
             popScale.animateTo(1f, spring(dampingRatio = 0.45f, stiffness = Spring.StiffnessLow))
-            delay(1600)
-            revealed = i + 1
-            revealing = false
         }
-        val end = reward.endTotal.toFloat()
-        progress.animateTo(end, tween(durationFor(end - progress.value), easing = FastOutSlowInEasing))
     }
 
-    val count = startCount + revealed
-    val segStart = Rewards.threshold(count)
-    val segEnd = Rewards.threshold(count + 1)
+    val k = stage / 2
+    val revealing = stage % 2 == 1
+    val segStart = Rewards.threshold(startCount + k)
+    val segEnd = Rewards.threshold(startCount + k + 1)
     val fraction = (progress.value - segStart) / (segEnd - segStart)
-    val shown: Mushroom? = if (revealing) reward.earned[revealed] else null
-    val silhouetteSpecies = reward.earned.getOrNull(revealed)?.species ?: reward.next?.species
+    val shown: Mushroom? = if (revealing) reward.earned[k] else null
+    val silhouetteSpecies = reward.earned.getOrNull(k)?.species ?: reward.next?.species
 
     Box(
         Modifier
             .fillMaxSize()
-            .onGloballyPositioned { containerOffset = it.positionInRoot() },
+            .onGloballyPositioned { containerOffset = it.positionInRoot() }
+            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {
+                if (stage >= lastStage) vm.back() else stage++
+            },
     ) {
         Column(
             Modifier.fillMaxSize().padding(24.dp),
@@ -242,11 +323,7 @@ fun CelebrationScreen(vm: MainViewModel, reward: Reward) {
             }
             Spacer(Modifier.height(16.dp))
             Text(
-                if (shown != null) {
-                    "Neuer Pilz: ${vm.catalog.find(shown.species)?.name ?: "?"}"
-                } else {
-                    "Nächster Pilz"
-                },
+                if (shown != null) "Neuer Pilz: ${vm.catalog.find(shown.species)?.name ?: "?"}" else "Nächster Pilz",
                 fontSize = 20.sp,
                 fontWeight = if (shown != null) FontWeight.Bold else FontWeight.Normal,
                 textAlign = TextAlign.Center,
@@ -256,15 +333,23 @@ fun CelebrationScreen(vm: MainViewModel, reward: Reward) {
                 Text(Rewards.SIZE_NAMES[shown.size - 1], fontSize = 15.sp, color = Muted)
             }
             Spacer(Modifier.height(24.dp))
-            ProgressBar(fraction)
-            Spacer(Modifier.height(8.dp))
+            Box(Modifier.alpha(if (revealing) 0f else 1f)) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    ProgressBar(fraction)
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "${(progress.value - segStart).toInt().coerceIn(0, segEnd - segStart)} / ${segEnd - segStart} Punkte",
+                        color = Muted,
+                        fontSize = 14.sp,
+                    )
+                }
+            }
+            Spacer(Modifier.weight(1f))
             Text(
-                "${(progress.value - segStart).toInt().coerceIn(0, segEnd - segStart)} / ${segEnd - segStart} Punkte",
-                color = Muted,
+                if (stage >= lastStage) "Tippen zum Schließen" else "Tippen zum Fortfahren",
+                color = Dim,
                 fontSize = 14.sp,
             )
-            Spacer(Modifier.weight(1f))
-            OutlineButton("Weiter", vm::back, Modifier.fillMaxWidth())
         }
 
         Canvas(Modifier.fillMaxSize()) {

@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
@@ -31,14 +32,14 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Tab
@@ -53,6 +54,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -64,41 +66,48 @@ import java.time.LocalDate
 fun HomeScreen(vm: MainViewModel) {
     var pickPlace by remember { mutableStateOf(false) }
 
-    Column(
-        modifier = Modifier.fillMaxSize().padding(24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-            BigRedButton(onClick = vm::drawTask)
+    Box(Modifier.fillMaxSize()) {
+        Column(
+            modifier = Modifier.fillMaxSize().padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                BigRedButton(onClick = vm::drawTask)
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                SelectField(
+                    value = vm.homePlace?.label ?: "",
+                    label = "Ort",
+                    onClick = { pickPlace = true },
+                    modifier = Modifier.weight(1f),
+                    decoKey = "ort",
+                )
+                TextInput(
+                    value = vm.homeMinutes,
+                    onValueChange = {
+                        vm.homeMinutes = it
+                        vm.homeHint = null
+                    },
+                    label = "Zeit",
+                    numeric = true,
+                    suffix = "Min.",
+                    modifier = Modifier.weight(1f),
+                    decoKey = "zeit",
+                )
+            }
+            vm.homeHint?.let {
+                Spacer(Modifier.height(12.dp))
+                Text(it, color = HintRed, fontSize = 15.sp, textAlign = TextAlign.Center)
+            }
+            Spacer(Modifier.height(32.dp))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                CircleIconButton(Icons.AutoMirrored.Filled.List, "Übersicht", { vm.open(Screen.Overview) }, decoKey = "uebersicht")
+                MushroomButton(onClick = { vm.open(Screen.Fungarium) }, active = vm.decorMode)
+                CircleIconButton(Icons.Filled.Add, "Aufgabe hinzufügen", { vm.open(Screen.Add) }, decoKey = "plus")
+            }
         }
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            SelectField(
-                value = vm.homePlace?.label ?: "",
-                label = "Ort",
-                onClick = { pickPlace = true },
-                modifier = Modifier.weight(1f),
-            )
-            TextInput(
-                value = vm.homeMinutes,
-                onValueChange = {
-                    vm.homeMinutes = it
-                    vm.homeHint = null
-                },
-                label = "Zeit",
-                numeric = true,
-                suffix = "Min.",
-                modifier = Modifier.weight(1f),
-            )
-        }
-        vm.homeHint?.let {
-            Spacer(Modifier.height(12.dp))
-            Text(it, color = HintRed, fontSize = 15.sp, textAlign = TextAlign.Center)
-        }
-        Spacer(Modifier.height(32.dp))
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            CircleIconButton(Icons.AutoMirrored.Filled.List, "Übersicht", { vm.open(Screen.Overview) })
-            MushroomButton(onClick = { vm.open(Screen.Fungarium) })
-            CircleIconButton(Icons.Filled.Add, "Aufgabe hinzufügen", { vm.open(Screen.Add) })
+        Box(Modifier.align(Alignment.TopEnd).padding(8.dp)) {
+            BackupMenu(vm)
         }
     }
 
@@ -115,6 +124,67 @@ fun HomeScreen(vm: MainViewModel) {
     }
 }
 
+/** ⋮-Menü mit "Daten sichern" und "Daten wiederherstellen". */
+@Composable
+fun BackupMenu(vm: MainViewModel) {
+    var menuOpen by remember { mutableStateOf(false) }
+    var pendingImport by remember { mutableStateOf<Uri?>(null) }
+    val context = LocalContext.current
+    val exportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
+        if (uri != null) {
+            val ok = vm.exportTo(uri)
+            Toast.makeText(context, if (ok) "Daten gesichert." else "Sichern hat nicht geklappt.", Toast.LENGTH_SHORT).show()
+        }
+    }
+    val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        pendingImport = uri
+    }
+
+    Box {
+        IconButton(onClick = { menuOpen = true }) {
+            Icon(Icons.Filled.MoreVert, "Mehr", tint = White)
+        }
+        DropdownMenu(
+            expanded = menuOpen,
+            onDismissRequest = { menuOpen = false },
+            modifier = Modifier.background(Black).border(1.dp, White, CardShape),
+        ) {
+            DropdownMenuItem(
+                text = { Text("Daten sichern", color = White) },
+                onClick = {
+                    menuOpen = false
+                    exportLauncher.launch("produktivitaet-sicherung-${LocalDate.now()}.json")
+                },
+            )
+            DropdownMenuItem(
+                text = { Text("Daten wiederherstellen", color = White) },
+                onClick = {
+                    menuOpen = false
+                    importLauncher.launch(arrayOf("*/*"))
+                },
+            )
+        }
+    }
+
+    pendingImport?.let { uri ->
+        ConfirmDialog(
+            title = "Daten wiederherstellen?",
+            text = "Alle aktuellen Aufgaben, Vorlagen, Punkte und Pilze werden durch die Sicherung ersetzt.",
+            confirmText = "Ersetzen",
+            onConfirm = {
+                pendingImport = null
+                val ok = vm.importFrom(uri)
+                Toast.makeText(
+                    context,
+                    if (ok) "Daten wiederhergestellt." else "Die Datei ist keine gültige Sicherung.",
+                    Toast.LENGTH_SHORT,
+                ).show()
+            },
+            onDismiss = { pendingImport = null },
+        )
+    }
+}
+
 /** Großer runder Knopf; wird kleiner, wenn wenig Platz ist (z. B. bei offener Tastatur). */
 @Composable
 private fun BigRedButton(onClick: () -> Unit) {
@@ -122,6 +192,7 @@ private fun BigRedButton(onClick: () -> Unit) {
         modifier = Modifier
             .sizeIn(maxWidth = 260.dp, maxHeight = 260.dp)
             .aspectRatio(1f, matchHeightConstraintsFirst = true)
+            .decoArea("produktivitaet", CircleShape)
             .clip(CircleShape)
             .background(DarkRed)
             .border(1.dp, HintRed.copy(alpha = 0.35f), CircleShape)
@@ -158,60 +229,56 @@ fun DrawScreen(vm: MainViewModel, taskId: Long?) {
                     textAlign = TextAlign.Center,
                 )
                 Spacer(Modifier.height(40.dp))
-                OutlineButton("Zurück", vm::back, Modifier.fillMaxWidth())
+                OutlineButton("Zurück", vm::back, Modifier.fillMaxWidth(), decoKey = "zurueck-unten")
             }
             MushroomBar(vm)
             return@Column
         }
 
         val step = task.currentStep
-        Column(Modifier.weight(1f).padding(horizontal = 24.dp)) {
-            Column(
-                modifier = Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.Center,
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                Text(
-                    task.title,
-                    fontSize = 30.sp,
-                    lineHeight = 38.sp,
-                    fontWeight = FontWeight.Bold,
-                    textAlign = TextAlign.Center,
-                )
-                if (task.totalSteps > 1) {
-                    Spacer(Modifier.height(20.dp))
-                    Text(
-                        "Schritt ${task.completedSteps + 1} von ${task.totalSteps}",
-                        color = Muted,
-                        fontSize = 16.sp,
-                    )
-                    if (step.title.isNotBlank()) {
-                        Spacer(Modifier.height(6.dp))
-                        Text(step.title, fontSize = 22.sp, lineHeight = 30.sp, textAlign = TextAlign.Center)
-                    }
+        val scroll = rememberScrollState()
+        RegisterDecorScroll(scroll)
+        Column(
+            modifier = Modifier.weight(1f).fillMaxWidth().verticalScroll(scroll).padding(horizontal = 16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            // Dieselbe Karte wie in der Übersicht – mit allen Pilzen, die auf der Aufgabe sitzen.
+            TaskCard(task, dimPending = true, isTemplate = false, actionSlots = 3)
+            Spacer(Modifier.height(28.dp))
+            if (task.totalSteps > 1) {
+                Text("Schritt ${task.completedSteps + 1} von ${task.totalSteps}", color = Muted, fontSize = 16.sp)
+                if (step.title.isNotBlank()) {
+                    Spacer(Modifier.height(6.dp))
+                    Text(step.title, fontSize = 22.sp, lineHeight = 30.sp, textAlign = TextAlign.Center)
                 }
-                Spacer(Modifier.height(20.dp))
-                Text(minutesText(step.minutes), color = Muted, fontSize = 20.sp)
-                Spacer(Modifier.height(6.dp))
-                Text("+${Rewards.pointsFor(step.minutes)} Punkte", color = Dim, fontSize = 15.sp)
+                Spacer(Modifier.height(14.dp))
             }
+            Text(minutesText(step.minutes), fontSize = 24.sp, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.height(6.dp))
+            Text("+${Rewards.pointsFor(step.minutes)} Punkte", color = Dim, fontSize = 15.sp)
             Spacer(Modifier.height(24.dp))
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                ColorButton("Erledigt", LightBlue, Black) { vm.completeStep(task.id, fromOverview = false) }
-                ColorButton("Wiederholen", DarkGreen, White) { vm.backToHome() }
-                ColorButton("Verwerfen", DarkRed, White) { vm.discardTask(task.id) }
-            }
-            Spacer(Modifier.height(16.dp))
         }
+        Column(
+            Modifier.padding(horizontal = 16.dp).padding(top = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            ColorButton("Erledigt", LightBlue, Black, "erledigt") { vm.completeStep(task.id, fromOverview = false) }
+            ColorButton("Wiederholen", DarkGreen, White, "wiederholen") { vm.backToHome() }
+            ColorButton("Verwerfen", DarkRed, White, "verwerfen") { vm.discardTask(task.id) }
+        }
+        Spacer(Modifier.height(8.dp))
         MushroomBar(vm)
     }
 }
 
 @Composable
 fun AddScreen(vm: MainViewModel) {
+    val listState = rememberLazyListState()
+    RegisterDecorScroll(listState)
     Column(Modifier.fillMaxSize()) {
         TopBar("Hinzufügen", vm::back)
         LazyColumn(
+            state = listState,
             modifier = Modifier.weight(1f),
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -222,6 +289,7 @@ fun AddScreen(vm: MainViewModel) {
                     onClick = { vm.newTask() },
                     modifier = Modifier.fillMaxWidth().heightIn(min = 64.dp),
                     icon = Icons.Filled.Add,
+                    decoKey = "neu",
                 )
             }
             item {
@@ -243,7 +311,7 @@ fun AddScreen(vm: MainViewModel) {
                 }
             }
             items(vm.store.templates, key = { it.id }) { template ->
-                TaskCard(template, dimPending = false, onClick = { vm.newTask(template) })
+                TaskCard(template, dimPending = false, isTemplate = true, actionSlots = 2, onClick = { vm.newTask(template) })
             }
         }
         MushroomBar(vm)
@@ -255,48 +323,14 @@ fun OverviewScreen(vm: MainViewModel) {
     // Paar aus zu löschendem Eintrag und ob es eine Vorlage ist.
     var toDelete by remember { mutableStateOf<Pair<Task, Boolean>?>(null) }
     var toComplete by remember { mutableStateOf<Task?>(null) }
-    var menuOpen by remember { mutableStateOf(false) }
-    var pendingImport by remember { mutableStateOf<Uri?>(null) }
-    val context = LocalContext.current
-    val exportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
-        if (uri != null) {
-            val ok = vm.exportTo(uri)
-            Toast.makeText(context, if (ok) "Daten gesichert." else "Sichern hat nicht geklappt.", Toast.LENGTH_SHORT).show()
-        }
-    }
-    val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        pendingImport = uri
-    }
     val showTemplates = vm.overviewTab == 1
     val list = if (showTemplates) vm.store.templates else vm.store.tasks
+    val listState = remember(showTemplates) { androidx.compose.foundation.lazy.LazyListState() }
+    RegisterDecorScroll(listState)
 
     Column(Modifier.fillMaxSize()) {
         TopBar("Übersicht", vm::back) {
-            Box {
-                IconButton(onClick = { menuOpen = true }) {
-                    Icon(Icons.Filled.MoreVert, "Mehr", tint = White)
-                }
-                DropdownMenu(
-                    expanded = menuOpen,
-                    onDismissRequest = { menuOpen = false },
-                    modifier = Modifier.background(Black).border(1.dp, White, CardShape),
-                ) {
-                    DropdownMenuItem(
-                        text = { Text("Daten sichern", color = White) },
-                        onClick = {
-                            menuOpen = false
-                            exportLauncher.launch("produktivitaet-sicherung-${LocalDate.now()}.json")
-                        },
-                    )
-                    DropdownMenuItem(
-                        text = { Text("Daten wiederherstellen", color = White) },
-                        onClick = {
-                            menuOpen = false
-                            importLauncher.launch(arrayOf("*/*"))
-                        },
-                    )
-                }
-            }
+            BackupMenu(vm)
         }
         TabRow(selectedTabIndex = vm.overviewTab, containerColor = Black, contentColor = White) {
             Tab(
@@ -305,6 +339,7 @@ fun OverviewScreen(vm: MainViewModel) {
                 text = { Text("Aufgaben (${vm.store.tasks.size})", fontSize = 16.sp) },
                 selectedContentColor = White,
                 unselectedContentColor = Muted,
+                modifier = Modifier.decoArea("reiter-aufgaben", RectangleShape),
             )
             Tab(
                 selected = showTemplates,
@@ -312,9 +347,11 @@ fun OverviewScreen(vm: MainViewModel) {
                 text = { Text("Vorlagen (${vm.store.templates.size})", fontSize = 16.sp) },
                 selectedContentColor = White,
                 unselectedContentColor = Muted,
+                modifier = Modifier.decoArea("reiter-vorlagen", RectangleShape),
             )
         }
         LazyColumn(
+            state = listState,
             modifier = Modifier.weight(1f),
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -329,7 +366,7 @@ fun OverviewScreen(vm: MainViewModel) {
                 }
             }
             items(list, key = { it.id }) { item ->
-                TaskCard(item, dimPending = !showTemplates) {
+                TaskCard(item, dimPending = !showTemplates, isTemplate = showTemplates, actionSlots = if (showTemplates) 2 else 3) {
                     if (!showTemplates) {
                         IconButton(onClick = { toComplete = item }) {
                             Icon(Icons.Filled.Check, "Erledigt", tint = LightBlue)
@@ -367,28 +404,11 @@ fun OverviewScreen(vm: MainViewModel) {
         )
     }
 
-    pendingImport?.let { uri ->
-        ConfirmDialog(
-            title = "Daten wiederherstellen?",
-            text = "Alle aktuellen Aufgaben, Vorlagen, Punkte und Pilze werden durch die Sicherung ersetzt.",
-            confirmText = "Ersetzen",
-            onConfirm = {
-                pendingImport = null
-                val ok = vm.importFrom(uri)
-                Toast.makeText(
-                    context,
-                    if (ok) "Daten wiederhergestellt." else "Die Datei ist keine gültige Sicherung.",
-                    Toast.LENGTH_SHORT,
-                ).show()
-            },
-            onDismiss = { pendingImport = null },
-        )
-    }
-
     toDelete?.let { (item, isTemplate) ->
         ConfirmDialog(
             title = if (isTemplate) "Vorlage löschen?" else "Aufgabe löschen?",
-            text = "„${item.title}“ wird endgültig gelöscht.",
+            text = "„${item.title}“ wird endgültig gelöscht." +
+                if (isTemplate) " Ihre Pilze kommen zurück ins Fungarium." else "",
             confirmText = "Löschen",
             onConfirm = {
                 if (isTemplate) vm.store.deleteTemplate(item.id) else vm.store.deleteTask(item.id)
@@ -408,24 +428,27 @@ fun EditorScreen(vm: MainViewModel) {
         EditTarget.TASK -> "Aufgabe bearbeiten"
         EditTarget.TEMPLATE -> "Vorlage bearbeiten"
     }
+    val scroll = rememberScrollState()
+    RegisterDecorScroll(scroll)
 
     Column(Modifier.fillMaxSize()) {
         TopBar(screenTitle, vm::back)
         Column(
             modifier = Modifier
                 .weight(1f)
-                .verticalScroll(rememberScrollState())
+                .verticalScroll(scroll)
                 .padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            TextInput(editor.title, { editor.title = it }, "Titel", Modifier.fillMaxWidth())
+            TextInput(editor.title, { editor.title = it }, "Titel", Modifier.fillMaxWidth(), decoKey = "titel")
 
             if (editor.steps.size == 1) {
-                StepFields(editor.steps[0], showTitle = false, onPickPlaces = { placesFor = it })
+                StepFields(editor.steps[0], 0, showTitle = false, onPickPlaces = { placesFor = it })
             } else {
                 editor.steps.forEachIndexed { i, step ->
                     key(step) {
                         StepCard(
+                            index = i,
                             number = editor.completedSteps + i + 1,
                             step = step,
                             onRemove = { editor.steps.remove(step) },
@@ -440,6 +463,7 @@ fun EditorScreen(vm: MainViewModel) {
                 onClick = { editor.steps.add(StepDraft()) },
                 modifier = Modifier.fillMaxWidth(),
                 icon = Icons.Filled.Add,
+                decoKey = "schritt-hinzufuegen",
             )
 
             if (editor.target == EditTarget.NEW) {
@@ -463,7 +487,7 @@ fun EditorScreen(vm: MainViewModel) {
             Spacer(Modifier.height(4.dp))
         }
 
-        Column(Modifier.padding(16.dp)) {
+        Column(Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp)) {
             editor.missingHint()?.let {
                 Text(it, color = Muted, fontSize = 14.sp, modifier = Modifier.padding(bottom = 8.dp))
             }
@@ -472,6 +496,7 @@ fun EditorScreen(vm: MainViewModel) {
                 onClick = vm::saveEditor,
                 modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp),
                 enabled = editor.isValid,
+                decoKey = "speichern",
             )
         }
         MushroomBar(vm)
@@ -490,7 +515,7 @@ fun EditorScreen(vm: MainViewModel) {
 }
 
 @Composable
-private fun StepCard(number: Int, step: StepDraft, onRemove: () -> Unit, onPickPlaces: (StepDraft) -> Unit) {
+private fun StepCard(index: Int, number: Int, step: StepDraft, onRemove: () -> Unit, onPickPlaces: (StepDraft) -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -503,17 +528,23 @@ private fun StepCard(number: Int, step: StepDraft, onRemove: () -> Unit, onPickP
                 Icon(Icons.Filled.Close, "Schritt entfernen", tint = Muted)
             }
         }
-        StepFields(step, showTitle = true, onPickPlaces = onPickPlaces)
+        StepFields(step, index, showTitle = true, onPickPlaces = onPickPlaces)
     }
 }
 
 @Composable
-private fun StepFields(step: StepDraft, showTitle: Boolean, onPickPlaces: (StepDraft) -> Unit) {
+private fun StepFields(step: StepDraft, index: Int, showTitle: Boolean, onPickPlaces: (StepDraft) -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         if (showTitle) {
-            TextInput(step.title, { step.title = it }, "Was ist zu tun? (optional)", Modifier.fillMaxWidth())
+            TextInput(
+                step.title,
+                { step.title = it },
+                "Was ist zu tun? (optional)",
+                Modifier.fillMaxWidth(),
+                decoKey = "schritt$index-titel",
+            )
         }
-        SelectField(step.places.label, "Orte", { onPickPlaces(step) }, Modifier.fillMaxWidth())
+        SelectField(step.places.label, "Orte", { onPickPlaces(step) }, Modifier.fillMaxWidth(), decoKey = "schritt$index-orte")
         TextInput(
             value = step.minutes,
             onValueChange = { step.minutes = it },
@@ -521,6 +552,7 @@ private fun StepFields(step: StepDraft, showTitle: Boolean, onPickPlaces: (StepD
             numeric = true,
             suffix = "Min.",
             modifier = Modifier.fillMaxWidth(),
+            decoKey = "schritt$index-dauer",
         )
     }
 }

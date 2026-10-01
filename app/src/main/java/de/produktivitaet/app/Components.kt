@@ -47,6 +47,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -105,10 +106,11 @@ fun OutlineButton(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
     icon: ImageVector? = null,
+    decoKey: String? = null,
 ) {
     OutlinedButton(
         onClick = onClick,
-        modifier = modifier.heightIn(min = 52.dp),
+        modifier = modifier.heightIn(min = 52.dp).then(if (decoKey != null) Modifier.decoArea(decoKey, FieldShape) else Modifier),
         enabled = enabled,
         shape = FieldShape,
         border = BorderStroke(1.dp, if (enabled) White else Dim),
@@ -129,10 +131,10 @@ fun OutlineButton(
 
 /** Farbige Schalter im Aufgabenfenster. */
 @Composable
-fun ColorButton(text: String, color: Color, textColor: Color, onClick: () -> Unit) {
+fun ColorButton(text: String, color: Color, textColor: Color, decoKey: String, onClick: () -> Unit) {
     Button(
         onClick = onClick,
-        modifier = Modifier.fillMaxWidth().height(60.dp),
+        modifier = Modifier.fillMaxWidth().height(60.dp).decoArea(decoKey, CardShape),
         shape = CardShape,
         colors = ButtonDefaults.buttonColors(containerColor = color, contentColor = textColor),
     ) {
@@ -146,10 +148,12 @@ fun CircleIconButton(
     contentDescription: String,
     onClick: () -> Unit,
     size: Dp = 64.dp,
+    decoKey: String? = null,
 ) {
     Box(
         modifier = Modifier
             .size(size)
+            .then(if (decoKey != null) Modifier.decoArea(decoKey, CircleShape) else Modifier)
             .clip(CircleShape)
             .background(Black)
             .border(1.dp, White, CircleShape)
@@ -166,26 +170,38 @@ fun TopBar(title: String, onBack: () -> Unit, actions: @Composable RowScope.() -
         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        CircleIconButton(Icons.AutoMirrored.Filled.ArrowBack, "Zurück", onBack, size = 44.dp)
+        CircleIconButton(Icons.AutoMirrored.Filled.ArrowBack, "Zurück", onBack, size = 44.dp, decoKey = "zurueck")
         Spacer(Modifier.width(16.dp))
         Text(title, fontSize = 22.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
         actions()
     }
 }
 
-/** Pilz-Button: öffnet das Fungarium. */
+/** Pilz-Button: öffnet das Fungarium. Im Pilz-Modus leuchtet er weiß. */
 @Composable
-fun MushroomButton(onClick: () -> Unit, size: Dp = 64.dp) {
+fun MushroomButton(onClick: () -> Unit, active: Boolean, size: Dp = 64.dp) {
     Box(
         modifier = Modifier
             .size(size)
+            .drawBehind {
+                if (active) {
+                    drawCircle(White.copy(alpha = 0.10f), radius = this.size.minDimension * 0.85f)
+                    drawCircle(White.copy(alpha = 0.18f), radius = this.size.minDimension * 0.68f)
+                }
+            }
+            .decoArea("pilz", CircleShape)
             .clip(CircleShape)
-            .background(Black)
+            .background(if (active) White else Black)
             .border(1.dp, White, CircleShape)
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
-        Icon(painterResource(R.drawable.ic_pilz), "Fungarium", tint = White, modifier = Modifier.size(size * 0.5f))
+        Icon(
+            painterResource(R.drawable.ic_pilz),
+            "Fungarium",
+            tint = if (active) Black else White,
+            modifier = Modifier.size(size * 0.5f),
+        )
     }
 }
 
@@ -193,7 +209,7 @@ fun MushroomButton(onClick: () -> Unit, size: Dp = 64.dp) {
 @Composable
 fun MushroomBar(vm: MainViewModel) {
     Box(Modifier.fillMaxWidth().padding(bottom = 12.dp, top = 4.dp), contentAlignment = Alignment.Center) {
-        MushroomButton(onClick = { vm.open(Screen.Fungarium) }, size = 56.dp)
+        MushroomButton(onClick = { vm.open(Screen.Fungarium) }, active = vm.decorMode, size = 56.dp)
     }
 }
 
@@ -269,6 +285,7 @@ fun TextInput(
     modifier: Modifier = Modifier,
     numeric: Boolean = false,
     suffix: String? = null,
+    decoKey: String? = null,
 ) {
     OutlinedTextField(
         value = value,
@@ -283,14 +300,20 @@ fun TextInput(
             keyboardType = if (numeric) KeyboardType.Number else KeyboardType.Text,
             imeAction = ImeAction.Done,
         ),
-        modifier = modifier,
+        modifier = modifier.then(if (decoKey != null) Modifier.decoArea(decoKey, FieldShape) else Modifier),
     )
 }
 
 /** Sieht aus wie ein Eingabefeld, öffnet beim Antippen aber eine Auswahl. */
 @Composable
-fun SelectField(value: String, label: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
-    Box(modifier) {
+fun SelectField(
+    value: String,
+    label: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    decoKey: String? = null,
+) {
+    Box(modifier.then(if (decoKey != null) Modifier.decoArea(decoKey, FieldShape) else Modifier)) {
         OutlinedTextField(
             value = value,
             onValueChange = {},
@@ -423,13 +446,17 @@ private fun stepInfo(step: Step) = "${step.places.label} · ${step.minutes} Min.
 fun TaskCard(
     task: Task,
     dimPending: Boolean,
+    isTemplate: Boolean,
+    actionSlots: Int,
     onClick: (() -> Unit)? = null,
     actions: (@Composable RowScope.() -> Unit)? = null,
 ) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
+            .decoArea(if (isTemplate) templateKey(task.id) else taskKey(task.id), CardShape)
             .clip(CardShape)
+            .background(Black)
             .border(1.dp, White, CardShape)
             .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
             .padding(start = 16.dp, end = 4.dp, top = 12.dp, bottom = 14.dp),
@@ -441,7 +468,17 @@ fun TaskCard(
                 fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.weight(1f).padding(vertical = 8.dp),
             )
-            actions?.invoke(this)
+            // Fester Platz für die Symbole, damit die Karte überall gleich aussieht
+            // (wichtig, damit Pilze auf der Karte immer an derselben Stelle sitzen).
+            if (actionSlots > 0) {
+                Row(
+                    Modifier.width(48.dp * actionSlots).height(48.dp),
+                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    actions?.invoke(this)
+                }
+            }
         }
         if (task.totalSteps == 1) {
             Text(stepInfo(task.currentStep), color = Muted, fontSize = 14.sp)

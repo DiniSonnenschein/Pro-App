@@ -59,6 +59,10 @@ data class Task(
     val title: String,
     val steps: List<Step>,
     val completedSteps: Int = 0,
+    /** Vorlage, aus der die Aufgabe entstanden ist – deren Pilze erscheinen als Kopien auf ihr. */
+    val templateId: Long? = null,
+    /** Pilz-Kopien der Vorlage, die auf dieser Aufgabe gelöscht wurden. */
+    val hiddenCopies: Set<Long> = emptySet(),
 ) {
     val currentStep: Step get() = steps.first()
     val totalSteps: Int get() = completedSteps + steps.size
@@ -118,4 +122,54 @@ object Rewards {
         }
         return 3
     }
+}
+
+/** Woran ein platzierter Pilz hängt. Die Position ist immer relativ zur linken oberen Ecke davon. */
+sealed interface Anchor {
+    /** Auf dem Fenster selbst, hinter allen Buttons. */
+    data class Window(val window: String) : Anchor
+
+    /** Auf einem Button/Feld eines Fensters, darauf zugeschnitten. */
+    data class Area(val window: String, val key: String) : Anchor
+
+    /** Auf einer Aufgabenkarte – gehört dann zur Aufgabe. */
+    data class OnTask(val taskId: Long) : Anchor
+
+    /** Auf einer Vorlagenkarte – wird auf alle Aufgaben aus dieser Vorlage kopiert. */
+    data class OnTemplate(val templateId: Long) : Anchor
+}
+
+/** Area-Schlüssel für Karten; alle anderen Schlüssel sind Buttons/Felder eines Fensters. */
+fun taskKey(id: Long) = "task:$id"
+fun templateKey(id: Long) = "template:$id"
+
+fun anchorForArea(window: String, key: String): Anchor = when {
+    key.startsWith("task:") -> Anchor.OnTask(key.removePrefix("task:").toLong())
+    key.startsWith("template:") -> Anchor.OnTemplate(key.removePrefix("template:").toLong())
+    else -> Anchor.Area(window, key)
+}
+
+/** Ein platzierter Pilz. [x]/[y] = Mittelpunkt in dp relativ zum [anchor]. */
+data class Placement(
+    val mushroomId: Long,
+    val anchor: Anchor,
+    val x: Float,
+    val y: Float,
+    val mirrored: Boolean = false,
+)
+
+/** Höhe eines Pilzes auf dem Bildschirm: winzig = so groß wie die runden Buttons, riesig = gut die halbe Bildschirmhöhe. */
+fun mushroomHeightDp(size: Int, screenHeightDp: Float): Float {
+    val smallest = 64f
+    val largest = maxOf(screenHeightDp * 0.55f, smallest * 2)
+    val ratio = Math.pow((largest / smallest).toDouble(), 1.0 / 4).toFloat()
+    return smallest * Math.pow(ratio.toDouble(), (size.coerceIn(1, 5) - 1).toDouble()).toFloat()
+}
+
+/** Anteil der Fläche von [a], der in [b] liegt (Rechtecke als left, top, right, bottom). */
+fun overlapFraction(a: FloatArray, b: FloatArray): Float {
+    val w = minOf(a[2], b[2]) - maxOf(a[0], b[0])
+    val h = minOf(a[3], b[3]) - maxOf(a[1], b[1])
+    val area = (a[2] - a[0]) * (a[3] - a[1])
+    return if (w <= 0f || h <= 0f || area <= 0f) 0f else w * h / area
 }

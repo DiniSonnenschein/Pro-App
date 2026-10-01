@@ -3,11 +3,19 @@ package de.produktivitaet.app
 import android.app.Application
 import android.net.Uri
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 sealed interface Screen {
     data object Home : Screen
@@ -22,6 +30,22 @@ sealed interface Screen {
 
 enum class EditTarget { NEW, TASK, TEMPLATE }
 
+/** Dekorierbares Fenster eines Bildschirms (null = nicht dekorierbar). */
+fun windowId(screen: Screen): String? = when (screen) {
+    Screen.Home -> "home"
+    Screen.Overview -> "overview"
+    Screen.Add -> "add"
+    Screen.Editor -> "editor"
+    is Screen.Draw -> if (screen.taskId != null) "draw" else "relax"
+    Screen.Fungarium, is Screen.Celebration -> null
+}
+
+/** Ein Pilz, den man im Pilz-Modus auswählen kann: ein platzierter oder eine Vorlagen-Kopie auf einer Aufgabe. */
+sealed interface DecorItemId {
+    data class Placed(val mushroomId: Long) : DecorItemId
+    data class Copy(val taskId: Long, val mushroomId: Long) : DecorItemId
+}
+
 class StepDraft(title: String = "", places: Places = Places(), minutes: String = "") {
     var title by mutableStateOf(title)
     var places by mutableStateOf(places)
@@ -35,6 +59,7 @@ class EditorState(
     val target: EditTarget,
     val editingId: Long?,
     val completedSteps: Int,
+    val templateId: Long?,
     title: String,
     steps: List<StepDraft>,
 ) {
@@ -63,6 +88,7 @@ class EditorState(
             target = EditTarget.NEW,
             editingId = null,
             completedSteps = 0,
+            templateId = template?.id,
             title = template?.title ?: "",
             steps = template?.steps?.map(::draftOf) ?: listOf(StepDraft()),
         )
@@ -71,6 +97,7 @@ class EditorState(
             target = target,
             editingId = task.id,
             completedSteps = task.completedSteps,
+            templateId = null,
             title = task.title,
             steps = task.steps.map(::draftOf),
         )
@@ -180,7 +207,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val steps = e.toSteps()
         when (e.target) {
             EditTarget.NEW -> {
-                store.addTask(title, steps)
+                store.addTask(title, steps, e.templateId)
                 if (e.saveAsTemplate) store.addTemplate(title, steps)
                 backToHome()
             }
@@ -193,5 +220,122 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 back()
             }
         }
+    }
+
+    // ---- Pilz-Modus ----
+
+    var decorMode by mutableStateOf(false)
+        private set
+    var selected by mutableStateOf<DecorItemId?>(null)
+    /** Der Pilz, der gerade gezogen wird – er wird an seinem alten Platz ausgeblendet. */
+    var dragging by mutableStateOf<DecorItemId?>(null)
+
+    /** Zuletzt gemessene Fenstergrößen in dp, um neue Pilze mittig abzusetzen. */
+    val windowSizesDp = HashMap<String, Offset>()
+
+    val canHandleBack: Boolean get() = canGoBack || decorMode
+
+    fun onBackPressed() {
+        if (decorMode && screen != Screen.Fungarium) exitDecorMode() else back()
+    }
+
+    /** Stift im Fungarium: Pilz-Modus an, zurück ins Fenster. */
+    fun enterDecorMode() {
+        decorMode = true
+        selected = null
+        back()
+    }
+
+    fun exitDecorMode() {
+        decorMode = false
+        selected = null
+        dragging = null
+    }
+
+    /** Pilz im Fungarium angetippt: ein Exemplar herausnehmen und mittig ins vorherige Fenster setzen. */
+    fun pickFromFungarium(species: String) {
+        val mushroom = store.takeFromFungarium(species) ?: return
+        back()
+        val window = windowId(screen) ?: return
+        val size = windowSizesDp[window] ?: Offset(360f, 640f)
+        decorMode = true
+        store.place(Placement(mushroom.id, Anchor.Window(window), size.x / 2, size.y / 2))
+        selected = DecorItemId.Placed(mushroom.id)
+    }
+
+    fun mirror(id: DecorItemId) {
+        if (id !is DecorItemId.Placed) return
+        val p = store.placementOf(id.mushroomId) ?: return
+        store.place(p.copy(mirrored = !p.mirrored))
+    }
+
+    fun deleteDecor(id: DecorItemId) {
+        when (id) {
+            is DecorItemId.Placed -> store.unplace(id.mushroomId)
+            is DecorItemId.Copy -> store.hideCopy(id.taskId, id.mushroomId)
+        }
+        selected = null
+    }
+
+    /** Ebenen-Button: zwischen Fenster (dahinter) und dem berührten Button/der Karte (darauf) wechseln. */
+    fun toggleLayer(item: VisibleDecor, win: DecorWindowState, density: Float) {
+        val p = item.placement ?: return
+        val anchor = p.anchor
+        if (anchor is Anchor.OnTemplate) return
+        val center = item.rect.center
+        val newPlacement = if (anchor is Anchor.Window) {
+            val (key, rect) = win.bestArea(item.rect) ?: return
+            p.copy(anchor = anchorForArea(win.window, key), x = (center.x - rect.left) / density, y = (center.y - rect.top) / density)
+        } else {
+            p.copy(anchor = Anchor.Window(win.window), x = center.x / density, y = center.y / density)
+        }
+        store.place(newPlacement)
+    }
+
+    /** Nach dem Ziehen: liegt der Pilz zum größten Teil auf einem Button/einer Karte, kommt er darauf, sonst dahinter. */
+    fun commitMove(item: VisibleDecor, newCenter: Offset, win: DecorWindowState, density: Float) {
+        dragging = null
+        val p = item.placement ?: return
+        val anchor = p.anchor
+        if (anchor is Anchor.OnTemplate) {
+            // Vorlagen-Pilze bleiben auf ihrer Vorlage.
+            val rect = win.areaRect(templateKey(anchor.templateId)) ?: return
+            store.place(p.copy(x = (newCenter.x - rect.left) / density, y = (newCenter.y - rect.top) / density))
+            return
+        }
+        val moved = item.rect.translate(newCenter - item.rect.center)
+        val best = win.bestArea(moved)
+        val newPlacement = if (best != null && overlapFraction(moved.toArray(), best.second.toArray()) > 0.5f) {
+            val (key, rect) = best
+            p.copy(anchor = anchorForArea(win.window, key), x = (newCenter.x - rect.left) / density, y = (newCenter.y - rect.top) / density)
+        } else {
+            p.copy(anchor = Anchor.Window(win.window), x = newCenter.x / density, y = newCenter.y / density)
+        }
+        store.place(newPlacement)
+    }
+
+    fun resetAllDecor() {
+        store.resetPlacements()
+        selected = null
+    }
+
+    // ---- Pilzbilder in Anzeigegröße ----
+
+    private val bitmaps = mutableStateMapOf<String, ImageBitmap>()
+    private val loading = HashSet<String>()
+
+    /** Liefert das Bild in passender Auflösung; lädt es bei Bedarf im Hintergrund nach. */
+    fun mushroomBitmap(species: String, heightPx: Float): ImageBitmap? {
+        var bucket = 128
+        while (bucket < heightPx && bucket < 2048) bucket *= 2
+        val key = "$species@$bucket"
+        bitmaps[key]?.let { return it }
+        if (loading.add(key)) {
+            viewModelScope.launch {
+                val image = withContext(Dispatchers.IO) { catalog.load(species, bucket)?.asImageBitmap() }
+                if (image != null) bitmaps[key] = image
+            }
+        }
+        return bitmaps.entries.firstOrNull { it.key.startsWith("$species@") }?.value
     }
 }

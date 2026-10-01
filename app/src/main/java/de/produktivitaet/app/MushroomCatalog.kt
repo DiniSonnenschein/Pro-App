@@ -32,6 +32,19 @@ class MushroomCatalog(private val context: Context) {
     fun roll(random: Random = Random.Default): MushroomRoll? =
         if (species.isEmpty()) null else MushroomRoll(species.random(random).id, Rewards.rollSize(random))
 
+    private val aspects = HashMap<String, Float>()
+
+    /** Breite / Höhe des Bildes (liest nur den Dateikopf). */
+    fun aspect(id: String): Float = aspects.getOrPut(id) {
+        try {
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            context.assets.open("$DIR/$id").use { BitmapFactory.decodeStream(it, null, bounds) }
+            if (bounds.outHeight > 0) bounds.outWidth.toFloat() / bounds.outHeight else 0.8f
+        } catch (e: Exception) {
+            0.8f
+        }
+    }
+
     fun cached(id: String, maxPx: Int): Bitmap? = cache.get("$id@$maxPx")
 
     /** Lädt das Bild so klein wie möglich, aber mindestens [maxPx] groß (falls das Original das hergibt). */
