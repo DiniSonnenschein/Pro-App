@@ -35,3 +35,14 @@ Die APK wird bei jedem Push automatisch von GitHub Actions gebaut
 Kotlin + Jetpack Compose, Daten liegen als JSON im App-Speicher (`daten.json`).
 Der Signaturschlüssel `app/produktivitaet.jks` liegt bewusst im Repository, damit jede
 gebaute Version als Update über die vorherige installiert werden kann.
+
+## Eigene Pilzbilder
+
+Alle Pilzarten sind die Bilder im Ordner `app/src/main/assets/pilze/`.
+Der Dateiname ist der angezeigte Name, Unterstriche werden zu Leerzeichen
+(`Grüner_Knollenblätterpilz.png` → „Grüner Knollenblätterpilz“).
+
+- PNG (oder WebP) mit transparentem Hintergrund, eng zugeschnitten, ca. 1500 px hoch
+- Bilder hinzufügen/ersetzen/löschen genügt – neue Arten erscheinen automatisch
+- Bereits erspielte Pilze einer entfernten Art bekommen beim nächsten Start
+  zufällig eine vorhandene Art (die Größe bleibt)
