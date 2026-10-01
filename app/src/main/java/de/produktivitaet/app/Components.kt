@@ -1,6 +1,8 @@
 package de.produktivitaet.app
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.background
@@ -25,6 +27,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
@@ -182,30 +185,53 @@ fun TopBar(title: String, onBack: () -> Unit, actions: @Composable RowScope.() -
     }
 }
 
-/** Pilz-Button: öffnet das Fungarium. Im Pilz-Modus leuchtet er weiß. */
+/** Pilz-Button: Antippen öffnet das Fungarium, langes Drücken startet den Pilz-Modus. */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun MushroomButton(onClick: () -> Unit, active: Boolean, size: Dp = 64.dp) {
+fun MushroomButton(onClick: () -> Unit, onLongClick: (() -> Unit)?, size: Dp = 64.dp) {
     Box(
         modifier = Modifier
             .size(size)
-            .drawBehind {
-                if (active) {
+            .decoArea("pilz", CircleShape, Black)
+            .clip(CircleShape)
+            .border(1.dp, White, CircleShape)
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(painterResource(R.drawable.ic_pilz), "Fungarium", tint = White, modifier = Modifier.size(size * 0.5f))
+    }
+}
+
+/**
+ * Mitte unten in jedem Fenster: normal der Pilz-Button; im Pilz-Modus ein leuchtender Haken
+ * (übernimmt alles und beendet den Modus) und daneben ein kleiner Pilz-Button fürs Fungarium.
+ * Im Pilz-Modus fängt die Bearbeitungsebene die Berührungen ab und erkennt die beiden über ihre Schlüssel.
+ */
+@Composable
+fun MushroomControls(vm: MainViewModel, size: Dp) {
+    if (!vm.decorMode) {
+        MushroomButton(onClick = { vm.open(Screen.Fungarium) }, onLongClick = vm::startDecorMode, size = size)
+        return
+    }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        MushroomButton(onClick = { vm.open(Screen.Fungarium) }, onLongClick = null, size = size * 0.7f)
+        Spacer(Modifier.width(14.dp))
+        Box(
+            modifier = Modifier
+                .size(size)
+                .drawBehind {
                     drawCircle(White.copy(alpha = 0.10f), radius = this.size.minDimension * 0.85f)
                     drawCircle(White.copy(alpha = 0.18f), radius = this.size.minDimension * 0.68f)
                 }
-            }
-            .decoArea("pilz", CircleShape, if (active) White else Black)
-            .clip(CircleShape)
-            .border(1.dp, White, CircleShape)
-            .clickable(onClick = onClick),
-        contentAlignment = Alignment.Center,
-    ) {
-        Icon(
-            painterResource(R.drawable.ic_pilz),
-            "Fungarium",
-            tint = if (active) Black else White,
-            modifier = Modifier.size(size * 0.5f),
-        )
+                .decoArea("fertig", CircleShape, White)
+                .clip(CircleShape)
+                .clickable(onClick = vm::confirmDecor),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(Icons.Filled.Check, "Fertig", tint = Black, modifier = Modifier.size(size * 0.5f))
+        }
+        // Gleicht den kleinen Pilz-Button aus, damit der Haken mittig sitzt.
+        Spacer(Modifier.width(14.dp + size * 0.7f))
     }
 }
 
@@ -213,7 +239,7 @@ fun MushroomButton(onClick: () -> Unit, active: Boolean, size: Dp = 64.dp) {
 @Composable
 fun MushroomBar(vm: MainViewModel) {
     Box(Modifier.fillMaxWidth().padding(bottom = 12.dp, top = 4.dp), contentAlignment = Alignment.Center) {
-        MushroomButton(onClick = { vm.open(Screen.Fungarium) }, active = vm.decorMode, size = 56.dp)
+        MushroomControls(vm, 56.dp)
     }
 }
 

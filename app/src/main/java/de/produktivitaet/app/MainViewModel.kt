@@ -239,20 +239,44 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val canHandleBack: Boolean get() = canGoBack || decorMode
 
     fun onBackPressed() {
-        if (decorMode && screen != Screen.Fungarium) exitDecorMode() else back()
+        if (decorMode && screen != Screen.Fungarium) confirmDiscard = true else back()
+    }
+
+    /** Abfrage "Änderungen verwerfen?" (Zurück-Taste im Pilz-Modus). */
+    var confirmDiscard by mutableStateOf(false)
+
+    /** Pilz-Modus im aktuellen Fenster starten (langes Drücken auf den Pilz-Button). */
+    fun startDecorMode() {
+        if (decorMode || windowId(screen) == null) return
+        store.beginDraft()
+        decorMode = true
+        selected = null
     }
 
     /** Stift im Fungarium: Pilz-Modus an, zurück ins Fenster. */
     fun enterDecorMode() {
-        decorMode = true
-        selected = null
         back()
+        startDecorMode()
     }
 
-    fun exitDecorMode() {
+    /** Haken: alle Platzierungen und Zuordnungen übernehmen, Modus beenden. */
+    fun confirmDecor() {
+        store.commitDraft()
+        leaveDecorMode()
+    }
+
+    /** Ohne Haken raus: alles seit Beginn des Modus verwerfen. */
+    fun discardDecor() {
+        confirmDiscard = false
+        store.revertDraft()
+        leaveDecorMode()
+    }
+
+    private fun leaveDecorMode() {
         decorMode = false
         selected = null
         dragging = null
+        autoLayerFor = null
     }
 
     /** Pilz im Fungarium angetippt: ein Exemplar herausnehmen und mittig ins vorherige Fenster setzen. */
@@ -261,7 +285,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         back()
         val window = windowId(screen) ?: return
         val size = windowSizesDp[window] ?: Offset(360f, 640f)
-        decorMode = true
+        startDecorMode()
         store.place(Placement(mushroom.id, Anchor.Window(window), size.x / 2, size.y / 2))
         selected = DecorItemId.Placed(mushroom.id)
         autoLayerFor = mushroom.id
@@ -285,7 +309,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun toggleLayer(item: VisibleDecor, win: DecorWindowState, density: Float) {
         val p = item.placement ?: return
         val anchor = p.anchor
-        if (anchor is Anchor.OnTemplate) return
         val center = item.rect.center
         val newPlacement = if (anchor is Anchor.Window) {
             val (key, rect) = win.bestArea(item.rect) ?: return
@@ -300,15 +323,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun commitMove(item: VisibleDecor, newCenter: Offset, win: DecorWindowState, density: Float) {
         dragging = null
         val p = item.placement ?: return
-        val anchor = p.anchor
-        if (anchor is Anchor.OnTemplate) {
-            // Vorlagen-Pilze bleiben auf ihrer Vorlage – höchstens bis an deren Rand.
-            val rect = win.areaRect(templateKey(anchor.templateId)) ?: return
-            val x = (newCenter.x - rect.left).coerceIn(0f, rect.width) / density
-            val y = (newCenter.y - rect.top).coerceIn(0f, rect.height) / density
-            store.place(p.copy(x = x, y = y))
-            return
-        }
         val moved = item.rect.translate(newCenter - item.rect.center)
         val best = win.bestArea(moved)
         val newPlacement = if (best != null && overlapFraction(moved.toArray(), best.second.toArray()) > 0.5f) {

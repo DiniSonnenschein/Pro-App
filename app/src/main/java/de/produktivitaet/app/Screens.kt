@@ -102,7 +102,7 @@ fun HomeScreen(vm: MainViewModel) {
             Spacer(Modifier.height(32.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 CircleIconButton(Icons.AutoMirrored.Filled.List, "Übersicht", { vm.open(Screen.Overview) }, decoKey = "uebersicht")
-                MushroomButton(onClick = { vm.open(Screen.Fungarium) }, active = vm.decorMode)
+                MushroomControls(vm, 64.dp)
                 CircleIconButton(Icons.Filled.Add, "Aufgabe hinzufügen", { vm.open(Screen.Add) }, decoKey = "plus")
             }
         }

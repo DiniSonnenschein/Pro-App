@@ -340,7 +340,9 @@ private fun DecorOverlay(vm: MainViewModel, win: DecorWindowState) {
                         dragOffset = Offset.Zero
                     } else if (!scrolling) {
                         val mushroomButton = win.areaRect("pilz")
+                        val doneButton = win.areaRect("fertig")
                         when {
+                            doneButton != null && doneButton.contains(start) -> vm.confirmDecor()
                             hit != null -> vm.selected = hit.id
                             mushroomButton != null && mushroomButton.contains(start) -> vm.open(Screen.Fungarium)
                             else -> vm.selected = null
@@ -394,7 +396,7 @@ private fun DecorToolbar(
 ) {
     val anchor = item.placement?.anchor
     val canFlip = item.placement != null
-    val canChangeLayer = anchor != null && anchor !is Anchor.OnTemplate &&
+    val canChangeLayer = anchor != null &&
         (anchor !is Anchor.Window || win.bestArea(item.rect) != null)
     val gap = 10.dp
 

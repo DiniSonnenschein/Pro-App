@@ -84,12 +84,7 @@ fun FungariumScreen(vm: MainViewModel) {
             ) {
                 Text(if (store.bigFirst) "Große zuerst" else "Kleine zuerst", fontSize = 13.sp)
             }
-            if (vm.decorMode) {
-                IconButton(onClick = {
-                    vm.exitDecorMode()
-                    vm.back()
-                }) { Icon(Icons.Filled.Check, "Fertig", tint = White) }
-            } else {
+            if (!vm.decorMode) {
                 IconButton(onClick = vm::enterDecorMode) { Icon(Icons.Filled.Edit, "Pilz-Modus", tint = White) }
             }
         }
@@ -105,7 +100,7 @@ fun FungariumScreen(vm: MainViewModel) {
             if (vm.decorMode) {
                 item(span = { GridItemSpan(maxLineSpan) }) {
                     Text(
-                        "Pilz-Modus: Tippe einen Pilz an, um ihn ins Fenster zu setzen. Mit ✓ beendest du den Modus.",
+                        "Pilz-Modus: Tippe einen Pilz an, um ihn ins Fenster zu setzen. Mit dem Haken im Fenster übernimmst du alles.",
                         fontSize = 14.sp,
                         color = White,
                     )

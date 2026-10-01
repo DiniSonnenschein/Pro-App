@@ -169,6 +169,35 @@ class TaskStore(context: Context, private val catalog: MushroomCatalog) {
         save()
     }
 
+    // ---- Entwurf im Pilz-Modus ----
+
+    /** Stand der Platzierungen (und gelöschten Kopien) beim Start des Pilz-Modus; null = kein Entwurf. */
+    private var draft: Pair<List<Placement>, Map<Long, Set<Long>>>? = null
+
+    /** Ab jetzt ist alles Entwurf: wird angezeigt, aber erst mit [commitDraft] gespeichert. */
+    fun beginDraft() {
+        draft = placements.toList() to tasks.associate { it.id to it.hiddenCopies }
+    }
+
+    /** Haken: Entwurf übernehmen. */
+    fun commitDraft() {
+        draft = null
+        save()
+    }
+
+    /** Verwerfen: alles zurück auf den Stand vor dem Pilz-Modus. */
+    fun revertDraft() {
+        val (oldPlacements, oldHidden) = draft ?: return
+        placements.clear()
+        placements.addAll(oldPlacements)
+        for (i in tasks.indices) {
+            val hidden = oldHidden[tasks[i].id] ?: continue
+            if (tasks[i].hiddenCopies != hidden) tasks[i] = tasks[i].copy(hiddenCopies = hidden)
+        }
+        draft = null
+        save()
+    }
+
     // ---- Sicherung ----
 
     /** Komplette Sicherung als Text (für "Daten sichern"). */
@@ -217,6 +246,7 @@ class TaskStore(context: Context, private val catalog: MushroomCatalog) {
     }
 
     private fun save() {
+        if (draft != null) return
         val out = file.startWrite()
         try {
             out.write(toJson().toString().toByteArray(Charsets.UTF_8))

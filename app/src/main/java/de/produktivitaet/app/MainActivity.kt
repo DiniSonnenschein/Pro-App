@@ -41,6 +41,16 @@ private fun App(vm: MainViewModel = viewModel()) {
     CompositionLocalProvider(LocalAppViewModel provides vm) {
         Surface(Modifier.fillMaxSize(), color = Black, contentColor = White) {
             Box(Modifier.fillMaxSize().safeDrawingPadding()) {
+                if (vm.confirmDiscard) {
+                    ConfirmDialog(
+                        title = "Änderungen verwerfen?",
+                        text = "Alles, was du seit Beginn des Pilz-Modus verändert hast, wird rückgängig gemacht. " +
+                            "Zum Übernehmen tippe auf den Haken.",
+                        confirmText = "Verwerfen",
+                        onConfirm = vm::discardDecor,
+                        onDismiss = { vm.confirmDiscard = false },
+                    )
+                }
                 val screen = vm.screen
                 val window = windowId(screen)
                 if (window != null) {
