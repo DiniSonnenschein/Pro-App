@@ -43,6 +43,8 @@ private fun App(vm: MainViewModel = viewModel()) {
                 Screen.Add -> AddScreen(vm)
                 Screen.Editor -> EditorScreen(vm)
                 Screen.Overview -> OverviewScreen(vm)
+                Screen.Fungarium -> FungariumScreen(vm)
+                is Screen.Celebration -> CelebrationScreen(vm, screen.reward)
             }
         }
     }

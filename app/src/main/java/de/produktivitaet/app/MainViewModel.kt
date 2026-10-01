@@ -1,6 +1,7 @@
 package de.produktivitaet.app
 
 import android.app.Application
+import android.net.Uri
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
@@ -15,16 +16,18 @@ sealed interface Screen {
     data object Add : Screen
     data object Editor : Screen
     data object Overview : Screen
+    data object Fungarium : Screen
+    data class Celebration(val reward: Reward) : Screen
 }
 
 enum class EditTarget { NEW, TASK, TEMPLATE }
 
-class StepDraft(title: String = "", places: Set<Place> = emptySet(), minutes: String = "") {
+class StepDraft(title: String = "", places: Places = Places(), minutes: String = "") {
     var title by mutableStateOf(title)
     var places by mutableStateOf(places)
     var minutes by mutableStateOf(minutes)
 
-    val hasPlaces: Boolean get() = places.isNotEmpty()
+    val hasPlaces: Boolean get() = !places.isEmpty
     val hasMinutes: Boolean get() = (minutes.toIntOrNull() ?: 0) > 0
 }
 
@@ -77,7 +80,8 @@ class EditorState(
 }
 
 class MainViewModel(app: Application) : AndroidViewModel(app) {
-    val store = TaskStore(app)
+    val catalog = MushroomCatalog(app)
+    val store = TaskStore(app, catalog)
 
     private val backStack = mutableStateListOf<Screen>(Screen.Home)
     val screen: Screen get() = backStack.last()
@@ -120,10 +124,38 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         open(Screen.Draw(eligibleTasks(store.tasks, place, minutes).randomOrNull()?.id))
     }
 
-    /** "Erledigt" und "Verwerfen": aktueller Schritt fliegt raus, der nächste rückt nach. */
-    fun finishStep(taskId: Long) {
-        store.advance(taskId)
+    /**
+     * Aktuellen Schritt erledigen und die Feier zeigen. Aus dem Aufgabenfenster geht es danach
+     * zur Startseite, aus der Übersicht zurück in die Übersicht.
+     */
+    fun completeStep(taskId: Long, fromOverview: Boolean) {
+        val reward = store.completeStep(taskId)
+        if (!fromOverview) backToHome()
+        if (reward != null) open(Screen.Celebration(reward))
+    }
+
+    /** "Verwerfen": die ganze Aufgabe fliegt raus, auch bei mehreren Schritten. */
+    fun discardTask(taskId: Long) {
+        store.deleteTask(taskId)
         backToHome()
+    }
+
+    fun exportTo(uri: Uri): Boolean = try {
+        getApplication<Application>().contentResolver.openOutputStream(uri, "wt")!!.use {
+            it.write(store.exportJson().toByteArray(Charsets.UTF_8))
+        }
+        true
+    } catch (e: Exception) {
+        false
+    }
+
+    fun importFrom(uri: Uri): Boolean = try {
+        val text = getApplication<Application>().contentResolver.openInputStream(uri)!!.use {
+            it.readBytes().toString(Charsets.UTF_8)
+        }
+        store.importJson(text)
+    } catch (e: Exception) {
+        false
     }
 
     fun newTask(template: Task? = null) {

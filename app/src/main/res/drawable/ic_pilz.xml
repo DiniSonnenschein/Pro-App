@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- Hut mit zwei ausgesparten Punkten -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:fillType="evenOdd"
+        android:pathData="M2.5,11.2C2.5,6.2 6.7,2.5 12,2.5C17.3,2.5 21.5,6.2 21.5,11.2Z M7,6.6a1.4,1.4 0,1 0,2.8 0a1.4,1.4 0,1 0,-2.8 0Z M13.6,8.2a1.1,1.1 0,1 0,2.2 0a1.1,1.1 0,1 0,-2.2 0Z" />
+    <!-- Stiel -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M9.6,12.6L14.4,12.6L15,19.4C15.1,20.6 13.8,21.5 12,21.5C10.2,21.5 8.9,20.6 9,19.4Z" />
+</vector>
