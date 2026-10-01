@@ -192,9 +192,8 @@ private fun BigRedButton(onClick: () -> Unit) {
         modifier = Modifier
             .sizeIn(maxWidth = 260.dp, maxHeight = 260.dp)
             .aspectRatio(1f, matchHeightConstraintsFirst = true)
-            .decoArea("produktivitaet", CircleShape)
+            .decoArea("produktivitaet", CircleShape, DarkRed)
             .clip(CircleShape)
-            .background(DarkRed)
             .border(1.dp, HintRed.copy(alpha = 0.35f), CircleShape)
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
@@ -339,7 +338,7 @@ fun OverviewScreen(vm: MainViewModel) {
                 text = { Text("Aufgaben (${vm.store.tasks.size})", fontSize = 16.sp) },
                 selectedContentColor = White,
                 unselectedContentColor = Muted,
-                modifier = Modifier.decoArea("reiter-aufgaben", RectangleShape),
+                modifier = Modifier.decoArea("reiter-aufgaben", RectangleShape, Black),
             )
             Tab(
                 selected = showTemplates,
@@ -347,7 +346,7 @@ fun OverviewScreen(vm: MainViewModel) {
                 text = { Text("Vorlagen (${vm.store.templates.size})", fontSize = 16.sp) },
                 selectedContentColor = White,
                 unselectedContentColor = Muted,
-                modifier = Modifier.decoArea("reiter-vorlagen", RectangleShape),
+                modifier = Modifier.decoArea("reiter-vorlagen", RectangleShape, Black),
             )
         }
         LazyColumn(

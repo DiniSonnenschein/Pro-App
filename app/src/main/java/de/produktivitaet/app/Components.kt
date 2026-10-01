@@ -77,6 +77,12 @@ val DarkGreen = Color(0xFF1F6B3A)
 val HintRed = Color(0xFFE88A8A)
 
 private val FieldShape = RoundedCornerShape(12.dp)
+
+/**
+ * Umriss eines OutlinedTextField: Das Feld hat oben 8 dp Platz für das schwebende Label,
+ * der sichtbare Rahmen beginnt erst darunter.
+ */
+private val TextFieldShape = TopInsetShape(FieldShape, 8.dp)
 val CardShape = RoundedCornerShape(14.dp)
 
 @Composable
@@ -110,14 +116,14 @@ fun OutlineButton(
 ) {
     OutlinedButton(
         onClick = onClick,
-        modifier = modifier.heightIn(min = 52.dp).then(if (decoKey != null) Modifier.decoArea(decoKey, FieldShape) else Modifier),
+        modifier = modifier.heightIn(min = 52.dp).decoArea(decoKey, FieldShape, Black),
         enabled = enabled,
         shape = FieldShape,
         border = BorderStroke(1.dp, if (enabled) White else Dim),
         colors = ButtonDefaults.outlinedButtonColors(
-            containerColor = Black,
+            containerColor = Color.Transparent,
             contentColor = White,
-            disabledContainerColor = Black,
+            disabledContainerColor = Color.Transparent,
             disabledContentColor = Dim,
         ),
     ) {
@@ -134,9 +140,9 @@ fun OutlineButton(
 fun ColorButton(text: String, color: Color, textColor: Color, decoKey: String, onClick: () -> Unit) {
     Button(
         onClick = onClick,
-        modifier = Modifier.fillMaxWidth().height(60.dp).decoArea(decoKey, CardShape),
+        modifier = Modifier.fillMaxWidth().height(60.dp).decoArea(decoKey, CardShape, color),
         shape = CardShape,
-        colors = ButtonDefaults.buttonColors(containerColor = color, contentColor = textColor),
+        colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent, contentColor = textColor),
     ) {
         Text(text, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
     }
@@ -153,9 +159,8 @@ fun CircleIconButton(
     Box(
         modifier = Modifier
             .size(size)
-            .then(if (decoKey != null) Modifier.decoArea(decoKey, CircleShape) else Modifier)
+            .decoArea(decoKey, CircleShape, Black)
             .clip(CircleShape)
-            .background(Black)
             .border(1.dp, White, CircleShape)
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
@@ -189,9 +194,8 @@ fun MushroomButton(onClick: () -> Unit, active: Boolean, size: Dp = 64.dp) {
                     drawCircle(White.copy(alpha = 0.18f), radius = this.size.minDimension * 0.68f)
                 }
             }
-            .decoArea("pilz", CircleShape)
+            .decoArea("pilz", CircleShape, if (active) White else Black)
             .clip(CircleShape)
-            .background(if (active) White else Black)
             .border(1.dp, White, CircleShape)
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
@@ -264,8 +268,9 @@ fun MushroomImage(
 private fun fieldColors() = OutlinedTextFieldDefaults.colors(
     focusedTextColor = White,
     unfocusedTextColor = White,
-    focusedContainerColor = Black,
-    unfocusedContainerColor = Black,
+    // Den schwarzen Hintergrund zeichnet decoArea – so liegen Pilze zwischen Hintergrund und Text.
+    focusedContainerColor = Color.Transparent,
+    unfocusedContainerColor = Color.Transparent,
     focusedBorderColor = White,
     unfocusedBorderColor = Muted,
     focusedLabelColor = White,
@@ -300,7 +305,7 @@ fun TextInput(
             keyboardType = if (numeric) KeyboardType.Number else KeyboardType.Text,
             imeAction = ImeAction.Done,
         ),
-        modifier = modifier.then(if (decoKey != null) Modifier.decoArea(decoKey, FieldShape) else Modifier),
+        modifier = modifier.decoArea(decoKey, TextFieldShape, Black),
     )
 }
 
@@ -313,7 +318,7 @@ fun SelectField(
     modifier: Modifier = Modifier,
     decoKey: String? = null,
 ) {
-    Box(modifier.then(if (decoKey != null) Modifier.decoArea(decoKey, FieldShape) else Modifier)) {
+    Box(modifier.decoArea(decoKey, TextFieldShape, Black)) {
         OutlinedTextField(
             value = value,
             onValueChange = {},
@@ -454,9 +459,8 @@ fun TaskCard(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .decoArea(if (isTemplate) templateKey(task.id) else taskKey(task.id), CardShape)
+            .decoArea(if (isTemplate) templateKey(task.id) else taskKey(task.id), CardShape, Black)
             .clip(CardShape)
-            .background(Black)
             .border(1.dp, White, CardShape)
             .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
             .padding(start = 16.dp, end = 4.dp, top = 12.dp, bottom = 14.dp),

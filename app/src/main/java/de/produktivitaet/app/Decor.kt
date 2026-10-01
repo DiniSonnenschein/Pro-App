@@ -20,6 +20,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
@@ -37,7 +38,11 @@ import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.FilterQuality
+import androidx.compose.ui.graphics.Outline
+import androidx.compose.ui.graphics.drawOutline
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.addOutline
 import androidx.compose.ui.graphics.PathEffect
@@ -55,6 +60,9 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
@@ -152,15 +160,30 @@ private fun areaDecor(vm: MainViewModel, window: String, key: String): List<Trip
     return result
 }
 
+/** Form wie [base], aber oben um [top] eingerückt (für Textfelder mit schwebendem Label). */
+class TopInsetShape(private val base: Shape, private val top: Dp) : Shape {
+    override fun createOutline(size: Size, layoutDirection: LayoutDirection, density: Density): Outline {
+        val t = with(density) { top.toPx() }.coerceAtMost(size.height)
+        val inner = base.createOutline(Size(size.width, size.height - t), layoutDirection, density)
+        val path = Path().apply {
+            addOutline(inner)
+            translate(Offset(0f, t))
+        }
+        return Outline.Generic(path)
+    }
+}
+
 /**
- * Macht ein Element zu einem Button/einer Karte im Sinne der Pilz-Ebenen: Seine Lage wird gemerkt,
- * und Pilze, die darauf liegen, werden über dem Inhalt gezeichnet und auf seine Form zugeschnitten.
- * Die Funktion des Buttons bleibt unberührt – Pilze fangen keine Berührungen ab.
+ * Macht ein Element zu einem Button/einer Karte im Sinne der Pilz-Ebenen. Gezeichnet wird in der
+ * Reihenfolge: Hintergrund ([background]) → Pilze, die darauf liegen (auf die Form zugeschnitten)
+ * → eigentlicher Inhalt (Rahmen, Text, Symbole). So bleiben Rahmen und Beschriftung immer sichtbar.
+ * Das Element selbst muss deshalb einen durchsichtigen Hintergrund haben.
+ * Ohne [key] (oder außerhalb eines dekorierbaren Fensters) wird nur der Hintergrund gezeichnet.
  */
-fun Modifier.decoArea(key: String, shape: Shape): Modifier = composed {
+fun Modifier.decoArea(key: String?, shape: Shape, background: Color): Modifier = composed {
     val win = LocalDecorWindow.current
     val vm = LocalAppViewModel.current
-    if (win == null || vm == null) return@composed Modifier
+    if (key == null || win == null || vm == null) return@composed Modifier.background(background, shape)
     val screenHeightDp = LocalConfiguration.current.screenHeightDp.toFloat()
     DisposableEffect(win, key) {
         onDispose { win.areas.remove(key) }
@@ -171,16 +194,19 @@ fun Modifier.decoArea(key: String, shape: Shape): Modifier = composed {
             if (win.areas[key]?.rectInRoot != rect) win.areas[key] = AreaInfo(rect, shape)
         }
         .drawWithContent {
-            drawContent()
+            val outline = shape.createOutline(size, layoutDirection, this)
+            drawOutline(outline, background)
             val items = areaDecor(vm, win.window, key)
-            if (items.isEmpty()) return@drawWithContent
-            val path = Path().apply { addOutline(shape.createOutline(size, layoutDirection, this@drawWithContent)) }
-            clipPath(path) {
-                for ((id, m, p) in items) {
-                    if (vm.dragging == id) continue
-                    drawMushroom(vm, m, Offset(p.x * density, p.y * density), p.mirrored, screenHeightDp)
+            if (items.isNotEmpty()) {
+                val path = Path().apply { addOutline(outline) }
+                clipPath(path) {
+                    for ((id, m, p) in items) {
+                        if (vm.dragging == id) continue
+                        drawMushroom(vm, m, Offset(p.x * density, p.y * density), p.mirrored, screenHeightDp)
+                    }
                 }
             }
+            drawContent()
         }
 }
 
@@ -326,6 +352,14 @@ private fun DecorOverlay(vm: MainViewModel, win: DecorWindowState) {
             },
     ) {
         val selected = items.firstOrNull { it.id == vm.selected }
+        // Frisch aus dem Fungarium: gleich auf die passende Ebene legen (z. B. auf den großen roten Knopf).
+        val fresh = vm.autoLayerFor
+        LaunchedEffect(fresh, win.areas.size) {
+            if (fresh == null || win.areas.isEmpty()) return@LaunchedEffect
+            val item = currentItems.firstOrNull { it.id == DecorItemId.Placed(fresh) } ?: return@LaunchedEffect
+            vm.autoLayerFor = null
+            vm.commitMove(item, item.rect.center, win, density)
+        }
         Canvas(Modifier.fillMaxSize()) {
             dragItem?.let {
                 drawMushroom(vm, it.mushroom, it.rect.center + dragOffset, it.mirrored, screenHeightDp)

@@ -230,6 +230,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     /** Der Pilz, der gerade gezogen wird – er wird an seinem alten Platz ausgeblendet. */
     var dragging by mutableStateOf<DecorItemId?>(null)
 
+    /** Gerade aus dem Fungarium gesetzter Pilz: bekommt seine Ebene, sobald das Fenster vermessen ist. */
+    var autoLayerFor by mutableStateOf<Long?>(null)
+
     /** Zuletzt gemessene Fenstergrößen in dp, um neue Pilze mittig abzusetzen. */
     val windowSizesDp = HashMap<String, Offset>()
 
@@ -261,6 +264,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         decorMode = true
         store.place(Placement(mushroom.id, Anchor.Window(window), size.x / 2, size.y / 2))
         selected = DecorItemId.Placed(mushroom.id)
+        autoLayerFor = mushroom.id
     }
 
     fun mirror(id: DecorItemId) {
@@ -298,9 +302,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val p = item.placement ?: return
         val anchor = p.anchor
         if (anchor is Anchor.OnTemplate) {
-            // Vorlagen-Pilze bleiben auf ihrer Vorlage.
+            // Vorlagen-Pilze bleiben auf ihrer Vorlage – höchstens bis an deren Rand.
             val rect = win.areaRect(templateKey(anchor.templateId)) ?: return
-            store.place(p.copy(x = (newCenter.x - rect.left) / density, y = (newCenter.y - rect.top) / density))
+            val x = (newCenter.x - rect.left).coerceIn(0f, rect.width) / density
+            val y = (newCenter.y - rect.top).coerceIn(0f, rect.height) / density
+            store.place(p.copy(x = x, y = y))
             return
         }
         val moved = item.rect.translate(newCenter - item.rect.center)
