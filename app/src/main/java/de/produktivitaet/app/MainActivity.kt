@@ -75,5 +75,7 @@ private fun ScreenContent(vm: MainViewModel, screen: Screen) {
         Screen.Overview -> OverviewScreen(vm)
         Screen.Fungarium -> FungariumScreen(vm)
         is Screen.Celebration -> CelebrationScreen(vm, screen.reward)
+        Screen.Settings -> SettingsScreen(vm)
+        Screen.Statistics -> StatisticsScreen(vm)
     }
 }

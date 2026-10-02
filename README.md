@@ -1,4 +1,4 @@
-# Produktivität
+# Toadstool
 
 Android-App, in der du Aufgaben notierst und dir per Knopfdruck eine zufällige Aufgabe
 ausspielen lässt, die zu deinem Ort und deiner verfügbaren Zeit passt.

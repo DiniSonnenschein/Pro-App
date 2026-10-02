@@ -3,28 +3,34 @@ package de.produktivitaet.app
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.time.LocalDate
 import kotlin.random.Random
 
 class RewardsTest {
     @Test
-    fun pointsAreMinutesBetween5And60() {
-        assertEquals(5, Rewards.pointsFor(1))
-        assertEquals(25, Rewards.pointsFor(25))
-        assertEquals(60, Rewards.pointsFor(240))
+    fun weeksRunFromMondayToSunday() {
+        val thursday = LocalDate.of(2026, 10, 1).toEpochDay()
+        val monday = LocalDate.of(2026, 9, 28).toEpochDay()
+        val sunday = LocalDate.of(2026, 10, 4).toEpochDay()
+        assertEquals(monday, weekStart(thursday))
+        assertEquals(monday, weekStart(monday))
+        assertEquals(monday, weekStart(sunday))
+        assertEquals(sunday + 1, weekStart(sunday + 1))
     }
 
     @Test
-    fun firstMushroomAt10ThenEvery30() {
-        assertEquals(0, Rewards.mushroomsFor(9))
-        assertEquals(1, Rewards.mushroomsFor(10))
-        assertEquals(1, Rewards.mushroomsFor(39))
-        assertEquals(2, Rewards.mushroomsFor(40))
-        assertEquals(4, Rewards.mushroomsFor(100))
-        assertEquals(listOf(0, 10, 40, 70), (0..3).map { Rewards.threshold(it) })
-        for (points in 0..500) {
-            val n = Rewards.mushroomsFor(points)
-            assertTrue(points >= Rewards.threshold(n) && points < Rewards.threshold(n + 1))
-        }
+    fun progressCountsStepsOrMinutesInRange() {
+        val log = listOf(Completion(10, 25), Completion(10, 5), Completion(11, 60), Completion(14, 30))
+        assertEquals(2, progressOf(log, GoalUnit.TASKS, 10, 10))
+        assertEquals(30, progressOf(log, GoalUnit.MINUTES, 10, 10))
+        assertEquals(3, progressOf(log, GoalUnit.TASKS, 10, 13))
+        assertEquals(120, progressOf(log, GoalUnit.MINUTES, 0, 20))
+    }
+
+    @Test
+    fun goalFormatStopsAtGoal() {
+        assertEquals("2 / 3 Aufgaben", Goal(3, GoalUnit.TASKS).format(2))
+        assertEquals("60 / 60 Minuten", Goal(60, GoalUnit.MINUTES).format(75))
     }
 
     @Test
@@ -49,9 +55,12 @@ class DecorRulesTest {
 
     @Test
     fun sizesGrowFromButtonSizeToHalfTheScreen() {
-        assertEquals(64f, mushroomHeightDp(1, 800f), 0.01f)
-        assertEquals(440f, mushroomHeightDp(5, 800f), 0.01f)
-        assertTrue((1..4).all { mushroomHeightDp(it, 800f) < mushroomHeightDp(it + 1, 800f) })
+        assertEquals(64f, spriteSizeDp(1, 800f), 0.01f)
+        assertEquals(440f, spriteSizeDp(5, 800f), 0.01f)
+        assertTrue((1..4).all { spriteSizeDp(it, 800f) < spriteSizeDp(it + 1, 800f) })
+        // Pilz-Wesen bleiben beim Verstellen in derselben Spanne.
+        assertEquals(440f, spriteSizeDp(3, 800f, scale = 10f), 0.01f)
+        assertEquals(64f, spriteSizeDp(3, 800f, scale = 0.01f), 0.01f)
     }
 
     @Test

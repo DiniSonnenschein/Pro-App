@@ -107,7 +107,7 @@ fun HomeScreen(vm: MainViewModel) {
             }
         }
         Box(Modifier.align(Alignment.TopEnd).padding(8.dp)) {
-            BackupMenu(vm)
+            AppMenu(vm)
         }
     }
 
@@ -124,9 +124,9 @@ fun HomeScreen(vm: MainViewModel) {
     }
 }
 
-/** ⋮-Menü mit "Daten sichern" und "Daten wiederherstellen". */
+/** ⋮-Menü: Einstellungen, Statistik, Daten sichern und wiederherstellen. */
 @Composable
-fun BackupMenu(vm: MainViewModel) {
+fun AppMenu(vm: MainViewModel) {
     var menuOpen by remember { mutableStateOf(false) }
     var pendingImport by remember { mutableStateOf<Uri?>(null) }
     val context = LocalContext.current
@@ -150,10 +150,24 @@ fun BackupMenu(vm: MainViewModel) {
             modifier = Modifier.background(Black).border(1.dp, White, CardShape),
         ) {
             DropdownMenuItem(
+                text = { Text("Einstellungen", color = White) },
+                onClick = {
+                    menuOpen = false
+                    vm.open(Screen.Settings)
+                },
+            )
+            DropdownMenuItem(
+                text = { Text("Statistik", color = White) },
+                onClick = {
+                    menuOpen = false
+                    vm.open(Screen.Statistics)
+                },
+            )
+            DropdownMenuItem(
                 text = { Text("Daten sichern", color = White) },
                 onClick = {
                     menuOpen = false
-                    exportLauncher.launch("produktivitaet-sicherung-${LocalDate.now()}.json")
+                    exportLauncher.launch("toadstool-sicherung-${LocalDate.now()}.json")
                 },
             )
             DropdownMenuItem(
@@ -169,7 +183,7 @@ fun BackupMenu(vm: MainViewModel) {
     pendingImport?.let { uri ->
         ConfirmDialog(
             title = "Daten wiederherstellen?",
-            text = "Alle aktuellen Aufgaben, Vorlagen, Punkte und Pilze werden durch die Sicherung ersetzt.",
+            text = "Alle aktuellen Aufgaben, Vorlagen, Ziele, Statistik, Pilze und Pilz-Wesen werden durch die Sicherung ersetzt.",
             confirmText = "Ersetzen",
             onConfirm = {
                 pendingImport = null
@@ -253,8 +267,6 @@ fun DrawScreen(vm: MainViewModel, taskId: Long?) {
                 Spacer(Modifier.height(14.dp))
             }
             Text(minutesText(step.minutes), fontSize = 24.sp, fontWeight = FontWeight.SemiBold)
-            Spacer(Modifier.height(6.dp))
-            Text("+${Rewards.pointsFor(step.minutes)} Punkte", color = Dim, fontSize = 15.sp)
             Spacer(Modifier.height(24.dp))
         }
         Column(
@@ -329,7 +341,7 @@ fun OverviewScreen(vm: MainViewModel) {
 
     Column(Modifier.fillMaxSize()) {
         TopBar("Übersicht", vm::back) {
-            BackupMenu(vm)
+            AppMenu(vm)
         }
         TabRow(selectedTabIndex = vm.overviewTab, containerColor = Black, contentColor = White) {
             Tab(
@@ -391,7 +403,7 @@ fun OverviewScreen(vm: MainViewModel) {
         }
         ConfirmDialog(
             title = "Erledigt?",
-            text = "$stepText als erledigt markieren? Du bekommst ${Rewards.pointsFor(task.currentStep.minutes)} Punkte.",
+            text = "$stepText als erledigt markieren?",
             confirmText = "Erledigt",
             confirmColor = LightBlue,
             confirmTextColor = Black,

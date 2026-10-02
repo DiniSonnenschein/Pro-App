@@ -17,6 +17,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.Icon
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
@@ -66,6 +67,7 @@ import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.toSize
 import kotlin.math.roundToInt
 
@@ -112,27 +114,41 @@ class VisibleDecor(
     val rect: Rect,
     val mirrored: Boolean,
     val onArea: Boolean,
+    val scale: Float,
 )
 
-private fun mushroomSizePx(vm: MainViewModel, m: Mushroom, density: Float, screenHeightDp: Float): Pair<Float, Float> {
-    val h = mushroomHeightDp(m.size, screenHeightDp) * density
-    return h * vm.catalog.aspect(m.species) to h
+/** Breite und Höhe in px: Die Größenstufe gilt für die längste Seite des Sprites. */
+private fun mushroomSizePx(vm: MainViewModel, m: Mushroom, density: Float, screenHeightDp: Float, scale: Float): Pair<Float, Float> {
+    val longest = spriteSizeDp(m.size, screenHeightDp, scale) * density
+    val aspect = vm.catalog.aspect(m.species)
+    return if (aspect >= 1f) longest to longest / aspect else longest * aspect to longest
 }
 
+/** Zeichnet ein Sprite mit weichem, ringsum gleichmäßigem Schatten. */
 fun DrawScope.drawMushroom(
     vm: MainViewModel,
     m: Mushroom,
     center: Offset,
     mirrored: Boolean,
     screenHeightDp: Float,
-    alpha: Float = 1f,
+    scale: Float = 1f,
 ) {
-    val (w, h) = mushroomSizePx(vm, m, density, screenHeightDp)
-    val image = vm.mushroomBitmap(m.species, h) ?: return
+    val (w, h) = mushroomSizePx(vm, m, density, screenHeightDp, scale)
+    val image = vm.mushroomBitmap(m.species, maxOf(w, h)) ?: return
     val topLeft = IntOffset((center.x - w / 2).roundToInt(), (center.y - h / 2).roundToInt())
     val size = IntSize(w.roundToInt().coerceAtLeast(1), h.roundToInt().coerceAtLeast(1))
     scale(if (mirrored) -1f else 1f, 1f, pivot = center) {
-        drawImage(image, dstOffset = topLeft, dstSize = size, alpha = alpha, filterQuality = FilterQuality.Medium)
+        vm.shadowFor(m.species)?.let { (shadow, padRatio) ->
+            val pad = padRatio * maxOf(w, h)
+            drawImage(
+                shadow,
+                dstOffset = IntOffset((center.x - w / 2 - pad).roundToInt(), (center.y - h / 2 - pad).roundToInt()),
+                dstSize = IntSize((w + 2 * pad).roundToInt().coerceAtLeast(1), (h + 2 * pad).roundToInt().coerceAtLeast(1)),
+                alpha = 0.45f,
+                filterQuality = FilterQuality.Low,
+            )
+        }
+        drawImage(image, dstOffset = topLeft, dstSize = size, filterQuality = FilterQuality.Medium)
     }
 }
 
@@ -202,7 +218,7 @@ fun Modifier.decoArea(key: String?, shape: Shape, background: Color): Modifier =
                 clipPath(path) {
                     for ((id, m, p) in items) {
                         if (vm.dragging == id) continue
-                        drawMushroom(vm, m, Offset(p.x * density, p.y * density), p.mirrored, screenHeightDp)
+                        drawMushroom(vm, m, Offset(p.x * density, p.y * density), p.mirrored, screenHeightDp, p.scale)
                     }
                 }
             }
@@ -241,7 +257,7 @@ fun DecoratedWindow(vm: MainViewModel, window: String, content: @Composable () -
                         if (a !is Anchor.Window || a.window != window) continue
                         if (vm.dragging == DecorItemId.Placed(p.mushroomId)) continue
                         val m = vm.store.findMushroom(p.mushroomId) ?: continue
-                        drawMushroom(vm, m, Offset(p.x * density, p.y * density), p.mirrored, screenHeightDp)
+                        drawMushroom(vm, m, Offset(p.x * density, p.y * density), p.mirrored, screenHeightDp, p.scale)
                     }
                 },
         ) {
@@ -255,9 +271,9 @@ fun DecoratedWindow(vm: MainViewModel, window: String, content: @Composable () -
 private fun visibleDecor(vm: MainViewModel, win: DecorWindowState, density: Float, screenHeightDp: Float): List<VisibleDecor> {
     val behind = mutableListOf<VisibleDecor>()
     val onTop = mutableListOf<VisibleDecor>()
-    fun add(id: DecorItemId, m: Mushroom, p: Placement?, center: Offset, mirrored: Boolean, onArea: Boolean) {
-        val (w, h) = mushroomSizePx(vm, m, density, screenHeightDp)
-        val item = VisibleDecor(id, m, p, Rect(center.x - w / 2, center.y - h / 2, center.x + w / 2, center.y + h / 2), mirrored, onArea)
+    fun add(id: DecorItemId, m: Mushroom, p: Placement?, center: Offset, mirrored: Boolean, onArea: Boolean, scale: Float) {
+        val (w, h) = mushroomSizePx(vm, m, density, screenHeightDp, scale)
+        val item = VisibleDecor(id, m, p, Rect(center.x - w / 2, center.y - h / 2, center.x + w / 2, center.y + h / 2), mirrored, onArea, scale)
         if (onArea) onTop += item else behind += item
     }
     for (p in vm.store.placements) {
@@ -268,7 +284,7 @@ private fun visibleDecor(vm: MainViewModel, win: DecorWindowState, density: Floa
             is Anchor.OnTask -> win.areaRect(taskKey(a.taskId))?.topLeft ?: continue
             is Anchor.OnTemplate -> win.areaRect(templateKey(a.templateId))?.topLeft ?: continue
         }
-        add(DecorItemId.Placed(m.id), m, p, origin + Offset(p.x * density, p.y * density), p.mirrored, p.anchor !is Anchor.Window)
+        add(DecorItemId.Placed(m.id), m, p, origin + Offset(p.x * density, p.y * density), p.mirrored, p.anchor !is Anchor.Window, p.scale)
     }
     // Kopien von Vorlagen-Pilzen auf Aufgabenkarten.
     for (key in win.areas.keys) {
@@ -279,7 +295,7 @@ private fun visibleDecor(vm: MainViewModel, win: DecorWindowState, density: Floa
         for (p in vm.store.placements) {
             if (p.anchor != Anchor.OnTemplate(templateId) || p.mushroomId in task.hiddenCopies) continue
             val m = vm.store.findMushroom(p.mushroomId) ?: continue
-            add(DecorItemId.Copy(task.id, m.id), m, null, origin + Offset(p.x * density, p.y * density), p.mirrored, true)
+            add(DecorItemId.Copy(task.id, m.id), m, null, origin + Offset(p.x * density, p.y * density), p.mirrored, true, p.scale)
         }
     }
     return behind + onTop
@@ -364,7 +380,7 @@ private fun DecorOverlay(vm: MainViewModel, win: DecorWindowState) {
         }
         Canvas(Modifier.fillMaxSize()) {
             dragItem?.let {
-                drawMushroom(vm, it.mushroom, it.rect.center + dragOffset, it.mirrored, screenHeightDp)
+                drawMushroom(vm, it.mushroom, it.rect.center + dragOffset, it.mirrored, screenHeightDp, it.scale)
             }
             if (selected != null && dragItem == null) {
                 val pad = 4.dp.toPx()
@@ -415,6 +431,10 @@ private fun DecorToolbar(
             }
         },
     ) {
+        if (canFlip && vm.isBeing(item.id)) {
+            ToolButton(text = "−", description = "Kleiner") { vm.resizeBeing(item.id, 1f / 1.2f) }
+            ToolButton(text = "+", description = "Größer") { vm.resizeBeing(item.id, 1.2f) }
+        }
         if (canFlip) ToolButton(painterRes = R.drawable.ic_spiegeln, description = "Spiegeln") { vm.mirror(item.id) }
         if (canChangeLayer) {
             ToolButton(painterRes = R.drawable.ic_ebene, description = "Ebene wechseln") { vm.toggleLayer(item, win, density) }
@@ -427,6 +447,7 @@ private fun DecorToolbar(
 private fun ToolButton(
     @DrawableRes painterRes: Int? = null,
     vector: ImageVector? = null,
+    text: String? = null,
     description: String,
     onClick: () -> Unit,
 ) {
@@ -443,6 +464,8 @@ private fun ToolButton(
             Icon(painterResource(painterRes), description, tint = White, modifier = Modifier.size(22.dp))
         } else if (vector != null) {
             Icon(vector, description, tint = White, modifier = Modifier.size(22.dp))
+        } else if (text != null) {
+            Text(text, color = White, fontSize = 24.sp)
         }
     }
 }

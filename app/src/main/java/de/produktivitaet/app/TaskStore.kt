@@ -3,15 +3,15 @@ package de.produktivitaet.app
 import android.content.Context
 import android.util.AtomicFile
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import java.time.LocalDate
 
-/** Hält Aufgaben, Vorlagen, Punkte, Pilze und deren Platzierungen und speichert alles als JSON-Datei. */
+/** Hält Aufgaben, Vorlagen, Ziele, Sprites und deren Platzierungen und speichert alles als JSON-Datei. */
 class TaskStore(context: Context, private val catalog: MushroomCatalog) {
     private val file = AtomicFile(File(context.filesDir, "daten.json"))
 
@@ -19,9 +19,18 @@ class TaskStore(context: Context, private val catalog: MushroomCatalog) {
     val templates = mutableStateListOf<Task>()
     val mushrooms = mutableStateListOf<Mushroom>()
     val placements = mutableStateListOf<Placement>()
-    var totalPoints by mutableIntStateOf(0)
+    /** Jeder erledigte Schritt mit Tag und Minuten – für Ziele und Statistik. */
+    val completions = mutableStateListOf<Completion>()
+    var dailyGoal by mutableStateOf(Rewards.DEFAULT_DAILY)
         private set
+    var weeklyGoal by mutableStateOf(Rewards.DEFAULT_WEEKLY)
+        private set
+    /** Tag bzw. Wochenbeginn (Epoch-Tag), für den es die Belohnung schon gab. */
+    private var rewardedDay: Long? = null
+    private var rewardedWeek: Long? = null
     var nextMushroom by mutableStateOf<MushroomRoll?>(null)
+        private set
+    var nextBeing by mutableStateOf<String?>(null)
         private set
 
     /** Fungarium-Schalter: beim Herausnehmen zuerst die großen (true) oder die kleinen Exemplare. */
@@ -82,27 +91,17 @@ class TaskStore(context: Context, private val catalog: MushroomCatalog) {
     }
 
     /**
-     * Aktuellen Schritt erledigen: Punkte gutschreiben, ggf. Pilze vergeben,
-     * nächster Schritt rückt nach (oder die Aufgabe verschwindet samt ihren Pilzen).
+     * Aktuellen Schritt erledigen: zählt für Tages- und Wochenziel, vergibt beim Erreichen den Pilz
+     * des Tages bzw. das Pilz-Wesen der Woche. Der nächste Schritt rückt nach (oder die Aufgabe
+     * verschwindet samt ihren Pilzen).
      */
     fun completeStep(id: Long): Reward? {
         val i = tasks.indexOfFirst { it.id == id }
         if (i < 0) return null
         val task = tasks[i]
-
-        val points = Rewards.pointsFor(task.currentStep.minutes)
-        val start = totalPoints
-        val end = start + points
-        val earned = mutableListOf<Mushroom>()
-        repeat(Rewards.mushroomsFor(end) - Rewards.mushroomsFor(start)) {
-            val roll = nextMushroom ?: catalog.roll() ?: return@repeat
-            val mushroom = Mushroom(nextMushroomId(), roll.species, roll.size)
-            mushrooms.add(mushroom)
-            earned.add(mushroom)
-            nextMushroom = catalog.roll()
-        }
-        if (nextMushroom == null) nextMushroom = catalog.roll()
-        totalPoints = end
+        val today = LocalDate.now().toEpochDay()
+        val (dayBefore, weekBefore) = currentProgress(today)
+        completions.add(Completion(today, task.currentStep.minutes))
 
         val next = task.advanced()
         if (next != null) {
@@ -111,8 +110,70 @@ class TaskStore(context: Context, private val catalog: MushroomCatalog) {
             tasks.removeAt(i)
             placements.removeAll { it.anchor == Anchor.OnTask(id) }
         }
+        val reward = evaluate(today, dayBefore, weekBefore)
         save()
-        return Reward(points, start, end, earned, nextMushroom)
+        return reward
+    }
+
+    /** Ziele ändern. Ist ein Ziel damit schon erreicht, gibt es die Belohnung sofort (dann nicht null). */
+    fun setGoals(daily: Goal, weekly: Goal): Reward? {
+        val today = LocalDate.now().toEpochDay()
+        dailyGoal = daily
+        weeklyGoal = weekly
+        val (day, week) = currentProgress(today)
+        val reward = evaluate(today, day, week)
+        save()
+        return if (reward.mushroom != null || reward.being != null) reward else null
+    }
+
+    /** Fortschritt heute und in dieser Woche, jeweils in der Einheit des Ziels. */
+    fun currentProgress(today: Long = LocalDate.now().toEpochDay()): Pair<Int, Int> {
+        val week = weekStart(today)
+        return progressOf(completions, dailyGoal.unit, today, today) to
+            progressOf(completions, weeklyGoal.unit, week, week + 6)
+    }
+
+    fun rewardedToday(today: Long = LocalDate.now().toEpochDay()) = rewardedDay == today
+    fun rewardedThisWeek(today: Long = LocalDate.now().toEpochDay()) = rewardedWeek == weekStart(today)
+
+    private fun evaluate(today: Long, dayBefore: Int, weekBefore: Int): Reward {
+        val week = weekStart(today)
+        val (dayAfter, weekAfter) = currentProgress(today)
+        val dayDone = rewardedDay == today
+        val weekDone = rewardedWeek == week
+
+        var mushroom: Mushroom? = null
+        if (!dayDone && dayAfter >= dailyGoal.value) {
+            val roll = nextMushroom ?: catalog.rollMushroom()
+            if (roll != null) {
+                mushroom = Mushroom(nextMushroomId(), roll.species, roll.size).also { mushrooms.add(it) }
+            }
+            rewardedDay = today
+            nextMushroom = catalog.rollMushroom()
+        }
+        var being: Mushroom? = null
+        if (!weekDone && weekAfter >= weeklyGoal.value) {
+            val species = nextBeing ?: rollBeing()
+            if (species != null) {
+                being = Mushroom(nextMushroomId(), species, Rewards.BEING_SIZE).also { mushrooms.add(it) }
+            }
+            rewardedWeek = week
+            nextBeing = rollBeing()
+        }
+        return Reward(
+            day = GoalProgress(dailyGoal, dayBefore, dayAfter, dayDone),
+            week = GoalProgress(weeklyGoal, weekBefore, weekAfter, weekDone),
+            mushroom = mushroom,
+            being = being,
+            nextMushroom = nextMushroom?.species,
+            nextBeing = nextBeing,
+        )
+    }
+
+    /** Zufälliges Pilz-Wesen, das noch nicht gesammelt wurde (jedes gibt es nur einmal). */
+    private fun rollBeing(): String? {
+        val owned = mushrooms.mapTo(HashSet()) { it.species }
+        return catalog.beings.filter { it.id !in owned }.randomOrNull()?.id
     }
 
     // ---- Fungarium und Platzierungen ----
@@ -226,19 +287,27 @@ class TaskStore(context: Context, private val catalog: MushroomCatalog) {
      * Pilze ins Leere. Diese bekommen eine zufällige vorhandene Art, die Größe bleibt.
      */
     private fun repairMushrooms(): Boolean {
-        if (catalog.species.isEmpty()) return false
         var changed = false
         for (i in mushrooms.indices) {
             val m = mushrooms[i]
-            if (catalog.find(m.species) == null) {
-                mushrooms[i] = m.copy(species = catalog.species.random().id)
+            if (catalog.find(m.species) == null && catalog.mushrooms.isNotEmpty()) {
+                mushrooms[i] = m.copy(species = catalog.mushrooms.random().id)
                 changed = true
             }
         }
         val next = nextMushroom
-        if (next == null || catalog.find(next.species) == null) {
-            nextMushroom = catalog.roll()
+        if (next == null || catalog.find(next.species)?.kind != SpriteKind.MUSHROOM) {
+            nextMushroom = catalog.rollMushroom()
             changed = true
+        }
+        val owned = mushrooms.mapTo(HashSet()) { it.species }
+        val being = nextBeing
+        if (being == null || catalog.find(being) == null || being in owned) {
+            val rolled = rollBeing()
+            if (rolled != being) {
+                nextBeing = rolled
+                changed = true
+            }
         }
         val ids = mushrooms.mapTo(HashSet()) { it.id }
         if (placements.removeAll { it.mushroomId !in ids }) changed = true
@@ -259,9 +328,14 @@ class TaskStore(context: Context, private val catalog: MushroomCatalog) {
     private class Data(
         val tasks: List<Task>,
         val templates: List<Task>,
-        val points: Int,
         val mushrooms: List<Mushroom>,
         val next: MushroomRoll?,
+        val nextBeing: String?,
+        val completions: List<Completion>,
+        val dailyGoal: Goal,
+        val weeklyGoal: Goal,
+        val rewardedDay: Long?,
+        val rewardedWeek: Long?,
         val placements: List<Placement>,
         val bigFirst: Boolean,
     )
@@ -275,16 +349,27 @@ class TaskStore(context: Context, private val catalog: MushroomCatalog) {
         mushrooms.addAll(data.mushrooms)
         placements.clear()
         placements.addAll(data.placements)
-        totalPoints = data.points
         nextMushroom = data.next
+        nextBeing = data.nextBeing
+        completions.clear()
+        completions.addAll(data.completions)
+        dailyGoal = data.dailyGoal
+        weeklyGoal = data.weeklyGoal
+        rewardedDay = data.rewardedDay
+        rewardedWeek = data.rewardedWeek
         bigFirst = data.bigFirst
     }
 
     private fun toJson(): JSONObject = JSONObject()
-        .put("version", 3)
+        .put("version", 4)
         .put("tasks", JSONArray().apply { tasks.forEach { put(it.toJson()) } })
         .put("templates", JSONArray().apply { templates.forEach { put(it.toJson()) } })
-        .put("points", totalPoints)
+        .put("completions", JSONArray().apply { completions.forEach { put(JSONArray().put(it.epochDay).put(it.minutes)) } })
+        .put("dailyGoal", dailyGoal.toJson())
+        .put("weeklyGoal", weeklyGoal.toJson())
+        .put("rewardedDay", rewardedDay)
+        .put("rewardedWeek", rewardedWeek)
+        .put("nextBeing", nextBeing)
         .put("mushrooms", JSONArray().apply { mushrooms.forEach { put(it.toJson()) } })
         .put("nextMushroom", nextMushroom?.let { JSONObject().put("species", it.species).put("size", it.size) })
         .put("placements", JSONArray().apply { placements.forEach { put(it.toJson()) } })
@@ -295,15 +380,32 @@ class TaskStore(context: Context, private val catalog: MushroomCatalog) {
         return Data(
             tasks = root.optJSONArray("tasks").toTasks(),
             templates = root.optJSONArray("templates").toTasks(),
-            points = root.optInt("points", 0),
             mushrooms = root.optJSONArray("mushrooms").mapObjects {
                 Mushroom(it.getLong("id"), it.getString("species"), it.getInt("size").coerceIn(1, 5))
             },
             next = next?.let { MushroomRoll(it.getString("species"), it.getInt("size").coerceIn(1, 5)) },
             placements = root.optJSONArray("placements").mapObjects { it.toPlacement() }.filterNotNull(),
             bigFirst = root.optBoolean("bigFirst", true),
+            nextBeing = if (root.isNull("nextBeing")) null else root.optString("nextBeing"),
+            completions = root.optJSONArray("completions").let { arr ->
+                if (arr == null) emptyList() else (0 until arr.length()).map {
+                    val c = arr.getJSONArray(it)
+                    Completion(c.getLong(0), c.getInt(1))
+                }
+            },
+            dailyGoal = root.optJSONObject("dailyGoal")?.toGoal() ?: Rewards.DEFAULT_DAILY,
+            weeklyGoal = root.optJSONObject("weeklyGoal")?.toGoal() ?: Rewards.DEFAULT_WEEKLY,
+            rewardedDay = if (root.isNull("rewardedDay")) null else root.optLong("rewardedDay"),
+            rewardedWeek = if (root.isNull("rewardedWeek")) null else root.optLong("rewardedWeek"),
         )
     }
+}
+
+private fun Goal.toJson(): JSONObject = JSONObject().put("value", value).put("unit", unit.name)
+
+private fun JSONObject.toGoal(): Goal? {
+    val unit = GoalUnit.entries.firstOrNull { it.name == optString("unit") } ?: return null
+    return Goal(optInt("value", 1).coerceAtLeast(1), unit)
 }
 
 private fun <T> JSONArray?.mapObjects(transform: (JSONObject) -> T): List<T> {
@@ -343,6 +445,7 @@ private fun Placement.toJson(): JSONObject {
         .put("x", x.toDouble())
         .put("y", y.toDouble())
         .put("mirrored", mirrored)
+        .put("scale", scale.toDouble())
 }
 
 private fun JSONObject.toPlacement(): Placement? {
@@ -360,6 +463,7 @@ private fun JSONObject.toPlacement(): Placement? {
         x = getDouble("x").toFloat(),
         y = getDouble("y").toFloat(),
         mirrored = optBoolean("mirrored", false),
+        scale = optDouble("scale", 1.0).toFloat(),
     )
 }
 

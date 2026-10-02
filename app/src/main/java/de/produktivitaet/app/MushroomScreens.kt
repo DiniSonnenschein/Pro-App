@@ -29,10 +29,11 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -42,6 +43,7 @@ import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
@@ -55,10 +57,14 @@ import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.exp
@@ -69,38 +75,59 @@ import kotlin.random.Random
 fun FungariumScreen(vm: MainViewModel) {
     val store = vm.store
     val earned = store.mushrooms.groupingBy { it.species }.eachCount()
-    val found = vm.catalog.species.count { (earned[it.id] ?: 0) > 0 }
+    var tab by rememberSaveable { mutableIntStateOf(0) }
+    val showBeings = tab == 1
+    val list = if (showBeings) vm.catalog.beings else vm.catalog.mushrooms
+    val found = list.count { (earned[it.id] ?: 0) > 0 }
     var confirmReset by remember { mutableStateOf(false) }
 
     Column(Modifier.fillMaxSize()) {
         TopBar("Fungarium", vm::back) {
-            // Schalter: welche Größe beim Herausnehmen zuerst kommt.
-            Box(
-                Modifier
-                    .clip(CircleShape)
-                    .border(1.dp, White, CircleShape)
-                    .clickable { store.toggleBigFirst() }
-                    .padding(horizontal = 12.dp, vertical = 7.dp),
-            ) {
-                Text(if (store.bigFirst) "Große zuerst" else "Kleine zuerst", fontSize = 13.sp)
+            if (!showBeings) {
+                // Schalter: welche Größe beim Herausnehmen zuerst kommt.
+                Box(
+                    Modifier
+                        .clip(CircleShape)
+                        .border(1.dp, White, CircleShape)
+                        .clickable { store.toggleBigFirst() }
+                        .padding(horizontal = 12.dp, vertical = 7.dp),
+                ) {
+                    Text(if (store.bigFirst) "Große zuerst" else "Kleine zuerst", fontSize = 13.sp)
+                }
             }
             if (!vm.decorMode) {
                 IconButton(onClick = vm::enterDecorMode) { Icon(Icons.Filled.Edit, "Pilz-Modus", tint = White) }
             }
         }
+        TabRow(selectedTabIndex = tab, containerColor = Black, contentColor = White) {
+            Tab(
+                selected = !showBeings,
+                onClick = { tab = 0 },
+                text = { Text("Pilze", fontSize = 16.sp) },
+                selectedContentColor = White,
+                unselectedContentColor = Muted,
+            )
+            Tab(
+                selected = showBeings,
+                onClick = { tab = 1 },
+                text = { Text("Pilz-Wesen", fontSize = 16.sp) },
+                selectedContentColor = White,
+                unselectedContentColor = Muted,
+            )
+        }
         LazyVerticalGrid(
             columns = GridCells.Fixed(3),
-            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 24.dp),
+            contentPadding = PaddingValues(16.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             item(span = { GridItemSpan(maxLineSpan) }) {
-                NextMushroomHeader(vm)
+                GoalsHeader(vm)
             }
             if (vm.decorMode) {
                 item(span = { GridItemSpan(maxLineSpan) }) {
                     Text(
-                        "Pilz-Modus: Tippe einen Pilz an, um ihn ins Fenster zu setzen. Mit dem Haken im Fenster übernimmst du alles.",
+                        "Pilz-Modus: Tippe ein Sprite an, um es ins Fenster zu setzen. Mit dem Haken im Fenster übernimmst du alles.",
                         fontSize = 14.sp,
                         color = White,
                     )
@@ -108,13 +135,12 @@ fun FungariumScreen(vm: MainViewModel) {
             }
             item(span = { GridItemSpan(maxLineSpan) }) {
                 Text(
-                    "$found von ${vm.catalog.species.size} Pilzarten gefunden",
+                    if (showBeings) "$found von ${list.size} Pilz-Wesen gefunden" else "$found von ${list.size} Pilzarten gefunden",
                     color = Muted,
                     fontSize = 15.sp,
-                    modifier = Modifier.padding(top = 4.dp),
                 )
             }
-            items(vm.catalog.species, key = { it.id }) { species ->
+            items(list, key = { it.id }) { species ->
                 val total = earned[species.id] ?: 0
                 val available = store.availableCount(species.id)
                 Column(
@@ -147,7 +173,28 @@ fun FungariumScreen(vm: MainViewModel) {
                         color = if (total > 0) White else Dim,
                         maxLines = 2,
                     )
-                    if (total > 0) Text("× $available", fontSize = 13.sp, color = Muted)
+                    if (total > 0 && species.latin != null) {
+                        Text(
+                            species.latin,
+                            fontSize = 11.sp,
+                            lineHeight = 13.sp,
+                            fontStyle = FontStyle.Italic,
+                            textAlign = TextAlign.Center,
+                            color = Muted,
+                            maxLines = 2,
+                        )
+                    }
+                    if (total > 0) {
+                        Text(
+                            when {
+                                !showBeings -> "× $available"
+                                available > 0 -> "im Fungarium"
+                                else -> "platziert"
+                            },
+                            fontSize = 12.sp,
+                            color = Muted,
+                        )
+                    }
                 }
             }
             if (store.placements.isNotEmpty()) {
@@ -165,7 +212,7 @@ fun FungariumScreen(vm: MainViewModel) {
     if (confirmReset) {
         ConfirmDialog(
             title = "Alles zurücksetzen?",
-            text = "Alle Pilze werden aus allen Fenstern, Aufgaben und Vorlagen entfernt und kommen zurück ins Fungarium.",
+            text = "Alle Pilze und Pilz-Wesen werden aus allen Fenstern, Aufgaben und Vorlagen entfernt und kommen zurück ins Fungarium.",
             confirmText = "Zurücksetzen",
             onConfirm = {
                 vm.resetAllDecor()
@@ -176,27 +223,57 @@ fun FungariumScreen(vm: MainViewModel) {
     }
 }
 
-/** Kopf des Fungariums: nächster Pilz als Silhouette und Fortschritt dorthin. */
+/** Kopf des Fungariums: Fortschritt zum Pilz des Tages und zum Pilz-Wesen der Woche. */
 @Composable
-private fun NextMushroomHeader(vm: MainViewModel) {
-    val total = vm.store.totalPoints
-    val count = Rewards.mushroomsFor(total)
-    val segStart = Rewards.threshold(count)
-    val segEnd = Rewards.threshold(count + 1)
-    Row(
+private fun GoalsHeader(vm: MainViewModel) {
+    val store = vm.store
+    val (day, week) = store.currentProgress()
+    Column(
         Modifier.fillMaxWidth().border(1.dp, White, CardShape).padding(14.dp),
-        verticalAlignment = Alignment.CenterVertically,
+        verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        Box(Modifier.size(72.dp)) {
-            vm.store.nextMushroom?.let { MushroomImage(vm.catalog, it.species, Modifier.fillMaxSize(), silhouette = true) }
+        GoalRow(
+            vm,
+            title = "Pilz des Tages",
+            species = store.nextMushroom?.species,
+            goal = store.dailyGoal,
+            progress = day,
+            done = store.rewardedToday(),
+            doneText = "Heute schon erspielt",
+        )
+        GoalRow(
+            vm,
+            title = "Pilz-Wesen der Woche",
+            species = store.nextBeing,
+            goal = store.weeklyGoal,
+            progress = week,
+            done = store.rewardedThisWeek(),
+            doneText = "Diese Woche schon erspielt",
+        )
+    }
+}
+
+@Composable
+private fun GoalRow(
+    vm: MainViewModel,
+    title: String,
+    species: String?,
+    goal: Goal,
+    progress: Int,
+    done: Boolean,
+    doneText: String,
+) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(56.dp)) {
+            if (species != null) MushroomImage(vm.catalog, species, Modifier.fillMaxSize(), silhouette = true)
         }
         Spacer(Modifier.width(14.dp))
         Column(Modifier.weight(1f)) {
-            Text("Nächster Pilz", fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
-            Spacer(Modifier.height(8.dp))
-            ProgressBar((total - segStart).toFloat() / (segEnd - segStart))
+            Text(title, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.height(6.dp))
-            Text("${total - segStart} / ${segEnd - segStart} Punkte · insgesamt $total", color = Muted, fontSize = 13.sp)
+            ProgressBar(if (done) 1f else progress.toFloat() / goal.value)
+            Spacer(Modifier.height(4.dp))
+            Text(if (done) "$doneText ✓" else goal.format(progress), color = Muted, fontSize = 13.sp)
         }
     }
 }
@@ -218,12 +295,12 @@ private class Spore(
 
 private class Burst(val startNanos: Long, val origin: Offset, val spores: List<Spore>)
 
-private fun burst(startNanos: Long, origin: Offset, density: Float, count: Int): Burst {
-    val r = Random(startNanos)
+private fun burst(startNanos: Long, origin: Offset, density: Float, count: Int, power: Float = 1f): Burst {
+    val r = Random(startNanos + origin.hashCode())
     return Burst(startNanos, origin, List(count) {
         Spore(
             angle = (r.nextFloat() * 2 * PI).toFloat(),
-            speed = (180 + r.nextFloat() * 520) * density,
+            speed = (180 + r.nextFloat() * 520) * density * power,
             radius = (2f + r.nextFloat() * 4.5f) * density,
             color = SporeColors[r.nextInt(SporeColors.size)],
             wobble = (6 + r.nextFloat() * 18) * density,
@@ -234,116 +311,110 @@ private fun burst(startNanos: Long, origin: Offset, density: Float, count: Int):
 }
 
 /**
- * Nach dem Erledigen, in Etappen per Antippen:
- * Balken füllt sich (Sporen) → [Tippen] neuer Pilz wird gezeigt (Sporen) → [Tippen] Balken zum nächsten Pilz → …
- * → [Tippen] schließen. Ohne neuen Pilz schließt das erste Tippen.
+ * Nach jedem erledigten Schritt: Sporen, darunter Pilz und Pilz-Wesen als Silhouette mit ihren
+ * Balken. Beide Balken wachsen um den neuen Fortschritt; ist einer voll, füllt sich die Silhouette
+ * mit dem erspielten Sprite und die Sporen fliegen weiter, bis der Bildschirm berührt wird.
  */
 @Composable
 fun CelebrationScreen(vm: MainViewModel, reward: Reward) {
     val density = LocalDensity.current.density
-    val startCount = remember { Rewards.mushroomsFor(reward.startTotal) }
-    val lastStage = 2 * reward.earned.size
-    // Gerade Etappe 2k: Balken für den k-ten Abschnitt. Ungerade 2k+1: Enthüllung des k-ten neuen Pilzes.
-    var stage by remember { mutableIntStateOf(0) }
-    val progress = remember { Animatable(reward.startTotal.toFloat()) }
-    val popScale = remember { Animatable(1f) }
+    val dayAnim = remember { Animatable(barFraction(reward.day, before = true)) }
+    val weekAnim = remember { Animatable(barFraction(reward.week, before = true)) }
+    var mushroomShown by remember { mutableStateOf(false) }
+    var beingShown by remember { mutableStateOf(false) }
+    var finished by remember { mutableStateOf(false) }
     var now by remember { mutableLongStateOf(0L) }
     val bursts = remember { mutableStateListOf<Burst>() }
     var containerOffset by remember { mutableStateOf(Offset.Zero) }
-    var mushroomCenterInRoot by remember { mutableStateOf(Offset.Zero) }
-    fun origin() = mushroomCenterInRoot - containerOffset
+    var mushroomCenter by remember { mutableStateOf(Offset.Zero) }
+    var beingCenter by remember { mutableStateOf(Offset.Zero) }
 
-    // Uhr für die Sporen.
+    // Uhr für die Sporen; alte Wolken werden aufgeräumt.
     LaunchedEffect(Unit) {
-        while (true) withFrameNanos { now = it }
-    }
-
-    LaunchedEffect(stage) {
-        val k = stage / 2
-        if (stage % 2 == 0) {
-            if (k == 0) {
-                withFrameNanos { bursts.add(burst(it, origin(), density, 70)) }
-            } else {
-                progress.snapTo(Rewards.threshold(startCount + k).toFloat())
-            }
-            val target = minOf(reward.endTotal, Rewards.threshold(startCount + k + 1)).toFloat()
-            progress.animateTo(target, tween(durationFor(target - progress.value), easing = FastOutSlowInEasing))
-        } else {
-            progress.snapTo(Rewards.threshold(startCount + k + 1).toFloat())
-            withFrameNanos { bursts.add(burst(it, origin(), density, 110)) }
-            popScale.snapTo(0.55f)
-            popScale.animateTo(1f, spring(dampingRatio = 0.45f, stiffness = Spring.StiffnessLow))
+        while (true) {
+            withFrameNanos { now = it }
+            bursts.removeAll { (now - it.startNanos) > 4_500_000_000L }
         }
     }
 
-    val k = stage / 2
-    val revealing = stage % 2 == 1
-    val segStart = Rewards.threshold(startCount + k)
-    val segEnd = Rewards.threshold(startCount + k + 1)
-    val fraction = (progress.value - segStart) / (segEnd - segStart)
-    val shown: Mushroom? = if (revealing) reward.earned[k] else null
-    val silhouetteSpecies = reward.earned.getOrNull(k)?.species ?: reward.next?.species
+    LaunchedEffect(Unit) {
+        withFrameNanos {
+            bursts.add(burst(it, mushroomCenter - containerOffset, density, 50))
+            bursts.add(burst(it, beingCenter - containerOffset, density, 50))
+        }
+        delay(300)
+        launch {
+            dayAnim.animateTo(barFraction(reward.day, before = false), tween(1200, easing = FastOutSlowInEasing))
+            if (reward.mushroom != null) {
+                mushroomShown = true
+                withFrameNanos { bursts.add(burst(it, mushroomCenter - containerOffset, density, 110)) }
+            }
+        }
+        launch {
+            weekAnim.animateTo(barFraction(reward.week, before = false), tween(1200, easing = FastOutSlowInEasing))
+            if (reward.being != null) {
+                beingShown = true
+                withFrameNanos { bursts.add(burst(it, beingCenter - containerOffset, density, 110)) }
+            }
+        }
+        delay(1600)
+        finished = true
+    }
+
+    // Solange etwas Neues gezeigt wird, sporen die Sprites weiter – bis der Bildschirm berührt wird.
+    LaunchedEffect(mushroomShown, beingShown) {
+        if (!mushroomShown && !beingShown) return@LaunchedEffect
+        while (true) {
+            delay(700)
+            withFrameNanos {
+                if (mushroomShown) bursts.add(burst(it, mushroomCenter - containerOffset, density, 28, power = 0.6f))
+                if (beingShown) bursts.add(burst(it, beingCenter - containerOffset, density, 28, power = 0.6f))
+            }
+        }
+    }
 
     Box(
         Modifier
             .fillMaxSize()
             .onGloballyPositioned { containerOffset = it.positionInRoot() }
-            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {
-                if (stage >= lastStage) vm.back() else stage++
-            },
+            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { vm.back() },
     ) {
         Column(
             Modifier.fillMaxSize().padding(24.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Spacer(Modifier.weight(1f))
-            Text("+${reward.points} Punkte", fontSize = 36.sp, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.height(28.dp))
-            Box(
-                Modifier
-                    .size(220.dp)
-                    .onGloballyPositioned { mushroomCenterInRoot = it.boundsInRoot().center }
-                    .graphicsLayer {
-                        scaleX = popScale.value
-                        scaleY = popScale.value
-                    },
-                contentAlignment = Alignment.Center,
-            ) {
-                Crossfade(targetState = shown?.species to (shown == null), label = "pilz") { (species, silhouette) ->
-                    val id = species ?: silhouetteSpecies
-                    if (id != null) {
-                        MushroomImage(vm.catalog, id, Modifier.fillMaxSize(), silhouette = silhouette, maxPx = 600)
-                    }
-                }
-            }
-            Spacer(Modifier.height(16.dp))
-            Text(
-                if (shown != null) "Neuer Pilz: ${vm.catalog.find(shown.species)?.name ?: "?"}" else "Nächster Pilz",
-                fontSize = 20.sp,
-                fontWeight = if (shown != null) FontWeight.Bold else FontWeight.Normal,
-                textAlign = TextAlign.Center,
-                color = if (shown != null) White else Muted,
+            Text("Geschafft!", fontSize = 34.sp, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.weight(0.6f))
+            RewardRow(
+                vm = vm,
+                title = "Pilz des Tages",
+                progress = reward.day,
+                fraction = dayAnim.value,
+                earned = reward.mushroom,
+                shown = mushroomShown,
+                silhouette = reward.mushroom?.species ?: reward.nextMushroom,
+                emptyText = null,
+                onCenter = { mushroomCenter = it },
             )
-            if (shown != null) {
-                Text(Rewards.SIZE_NAMES[shown.size - 1], fontSize = 15.sp, color = Muted)
-            }
-            Spacer(Modifier.height(24.dp))
-            Box(Modifier.alpha(if (revealing) 0f else 1f)) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    ProgressBar(fraction)
-                    Spacer(Modifier.height(8.dp))
-                    Text(
-                        "${(progress.value - segStart).toInt().coerceIn(0, segEnd - segStart)} / ${segEnd - segStart} Punkte",
-                        color = Muted,
-                        fontSize = 14.sp,
-                    )
-                }
-            }
+            Spacer(Modifier.height(28.dp))
+            RewardRow(
+                vm = vm,
+                title = "Pilz-Wesen der Woche",
+                progress = reward.week,
+                fraction = weekAnim.value,
+                earned = reward.being,
+                shown = beingShown,
+                silhouette = reward.being?.species ?: reward.nextBeing,
+                emptyText = "Alle Pilz-Wesen gesammelt!",
+                onCenter = { beingCenter = it },
+            )
             Spacer(Modifier.weight(1f))
             Text(
-                if (stage >= lastStage) "Tippen zum Schließen" else "Tippen zum Fortfahren",
+                "Tippen zum Schließen",
                 color = Dim,
                 fontSize = 14.sp,
+                modifier = Modifier.alpha(if (finished) 1f else 0f),
             )
         }
 
@@ -366,4 +437,70 @@ fun CelebrationScreen(vm: MainViewModel, reward: Reward) {
     }
 }
 
-private fun durationFor(points: Float): Int = (points * 35).toInt().coerceIn(500, 1600)
+/** Balkenstand: voll, wenn die Belohnung für diesen Zeitraum schon vorher erspielt war. */
+private fun barFraction(p: GoalProgress, before: Boolean): Float {
+    if (p.alreadyRewarded) return 1f
+    val value = if (before) p.before else p.after
+    return (value.toFloat() / p.goal.value).coerceIn(0f, 1f)
+}
+
+@Composable
+private fun RewardRow(
+    vm: MainViewModel,
+    title: String,
+    progress: GoalProgress,
+    fraction: Float,
+    earned: Mushroom?,
+    shown: Boolean,
+    silhouette: String?,
+    emptyText: String?,
+    onCenter: (Offset) -> Unit,
+    imageSize: Dp = 150.dp,
+) {
+    val pop = remember { Animatable(1f) }
+    LaunchedEffect(shown) {
+        if (shown) {
+            pop.snapTo(0.55f)
+            pop.animateTo(1f, spring(dampingRatio = 0.45f, stiffness = Spring.StiffnessLow))
+        }
+    }
+    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
+        Box(
+            Modifier
+                .size(imageSize)
+                .onGloballyPositioned { onCenter(it.boundsInRoot().center) }
+                .graphicsLayer {
+                    scaleX = pop.value
+                    scaleY = pop.value
+                },
+            contentAlignment = Alignment.Center,
+        ) {
+            if (silhouette != null) {
+                Crossfade(targetState = shown, label = "sprite") { revealed ->
+                    MushroomImage(vm.catalog, silhouette, Modifier.fillMaxSize(), silhouette = !revealed, maxPx = 500)
+                }
+            } else if (emptyText != null) {
+                Text(emptyText, color = Muted, fontSize = 14.sp, textAlign = TextAlign.Center)
+            }
+        }
+        Spacer(Modifier.height(10.dp))
+        Text(
+            if (shown && earned != null) "Neu: ${vm.catalog.find(earned.species)?.name ?: "?"}" else title,
+            fontSize = 17.sp,
+            fontWeight = if (shown) FontWeight.Bold else FontWeight.Normal,
+            color = if (shown) White else Muted,
+            textAlign = TextAlign.Center,
+        )
+        if (shown && earned != null && !vm.catalog.isBeing(earned.species)) {
+            Text(Rewards.SIZE_NAMES[earned.size - 1], fontSize = 13.sp, color = Muted)
+        }
+        Spacer(Modifier.height(10.dp))
+        ProgressBar(fraction)
+        Spacer(Modifier.height(6.dp))
+        Text(
+            if (progress.alreadyRewarded) "${progress.goal.format(progress.after)} ✓" else progress.goal.format(progress.after),
+            color = Muted,
+            fontSize = 14.sp,
+        )
+    }
+}

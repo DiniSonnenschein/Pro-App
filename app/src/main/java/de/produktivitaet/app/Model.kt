@@ -1,5 +1,7 @@
 package de.produktivitaet.app
 
+import java.time.DayOfWeek
+import java.time.LocalDate
 import kotlin.random.Random
 
 /** Reihenfolge = alphabetische Anzeige-Reihenfolge. Gespeichert wird der Name, daher ist Umsortieren gefahrlos. */
@@ -78,41 +80,67 @@ data class Task(
 fun eligibleTasks(tasks: List<Task>, place: Place, availableMinutes: Int): List<Task> =
     tasks.filter { it.fits(place, availableMinutes) }
 
-/** Ein erspielter Pilz. [species] ist der Dateiname im Ordner assets/pilze, [size] 1 (winzig) bis 5 (riesig). */
+/**
+ * Ein erspieltes Sprite (Pilz oder Pilz-Wesen). [species] ist der Dateiname im Ordner assets/sprites,
+ * [size] 1 (winzig) bis 5 (riesig); Pilz-Wesen haben immer 3 und werden über [Placement.scale] verstellt.
+ */
 data class Mushroom(val id: Long, val species: String, val size: Int)
 
 /** Der vorab ausgeloste nächste Pilz – so kann seine Silhouette schon gezeigt werden. */
 data class MushroomRoll(val species: String, val size: Int)
 
-/** Ergebnis eines erledigten Schritts, für die Feier-Animation. */
+enum class GoalUnit(val label: String) {
+    TASKS("Aufgaben"),
+    MINUTES("Minuten"),
+}
+
+/** Tages- oder Wochenziel: [value] Aufgaben bzw. Minuten. */
+data class Goal(val value: Int, val unit: GoalUnit) {
+    fun format(progress: Int) = "${progress.coerceAtMost(value)} / $value ${unit.label}"
+}
+
+/** Ein erledigter Schritt (für Ziele und Statistik). */
+data class Completion(val epochDay: Long, val minutes: Int)
+
+/** Montag der Woche (Montag–Sonntag), in der [epochDay] liegt. */
+fun weekStart(epochDay: Long): Long = LocalDate.ofEpochDay(epochDay).with(DayOfWeek.MONDAY).toEpochDay()
+
+/** Aufgaben bzw. Minuten im Zeitraum [from]..[to] (Epoch-Tage, beide inklusive). */
+fun progressOf(completions: List<Completion>, unit: GoalUnit, from: Long, to: Long): Int =
+    completions.filter { it.epochDay in from..to }.sumOf { if (unit == GoalUnit.TASKS) 1 else it.minutes }
+
+/** Fortschritt zu einem Ziel vor und nach einem erledigten Schritt. */
+data class GoalProgress(
+    val goal: Goal,
+    val before: Int,
+    val after: Int,
+    /** Belohnung für diesen Tag/diese Woche gab es schon vorher. */
+    val alreadyRewarded: Boolean,
+)
+
+/** Ergebnis eines erledigten Schritts, für die Feier. */
 data class Reward(
-    val points: Int,
-    val startTotal: Int,
-    val endTotal: Int,
-    val earned: List<Mushroom>,
-    val next: MushroomRoll?,
+    val day: GoalProgress,
+    val week: GoalProgress,
+    /** Heute neu erspielter Pilz (Tagesziel erreicht) oder null. */
+    val mushroom: Mushroom?,
+    /** Neu erspieltes Pilz-Wesen (Wochenziel erreicht) oder null. */
+    val being: Mushroom?,
+    /** Silhouetten, falls nichts Neues erspielt wurde. null = keins mehr übrig. */
+    val nextMushroom: String?,
+    val nextBeing: String?,
 )
 
 object Rewards {
-    const val FIRST_MUSHROOM = 10
-    const val POINTS_PER_MUSHROOM = 30
-    const val MIN_POINTS = 5
-    const val MAX_POINTS = 60
-
     val SIZE_NAMES = listOf("Winzig", "Klein", "Mittel", "Groß", "Riesig")
+
+    const val BEING_SIZE = 3
+
+    val DEFAULT_DAILY = Goal(3, GoalUnit.TASKS)
+    val DEFAULT_WEEKLY = Goal(20, GoalUnit.TASKS)
 
     /** Mittlere Größen etwas häufiger, ganz kleine und ganz große etwas seltener (in Prozent). */
     private val SIZE_WEIGHTS = listOf(17, 21, 24, 21, 17)
-
-    /** Ein Punkt pro Minute, mindestens 5, höchstens 60. */
-    fun pointsFor(minutes: Int): Int = minutes.coerceIn(MIN_POINTS, MAX_POINTS)
-
-    /** Gesamtpunktzahl, ab der man den [count]-ten Pilz hat: 10, 40, 70, … */
-    fun threshold(count: Int): Int =
-        if (count <= 0) 0 else FIRST_MUSHROOM + POINTS_PER_MUSHROOM * (count - 1)
-
-    fun mushroomsFor(points: Int): Int =
-        if (points < FIRST_MUSHROOM) 0 else 1 + (points - FIRST_MUSHROOM) / POINTS_PER_MUSHROOM
 
     fun rollSize(random: Random): Int {
         var r = random.nextInt(SIZE_WEIGHTS.sum())
@@ -156,12 +184,23 @@ data class Placement(
     val x: Float,
     val y: Float,
     val mirrored: Boolean = false,
+    /** Nur Pilz-Wesen: Größenfaktor, im Pilz-Modus mit − / + verstellbar. */
+    val scale: Float = 1f,
 )
 
-/** Höhe eines Pilzes auf dem Bildschirm: winzig = so groß wie die runden Buttons, riesig = gut die halbe Bildschirmhöhe. */
-fun mushroomHeightDp(size: Int, screenHeightDp: Float): Float {
-    val smallest = 64f
-    val largest = maxOf(screenHeightDp * 0.55f, smallest * 2)
+private const val SMALLEST_SPRITE_DP = 64f
+private fun largestSpriteDp(screenHeightDp: Float) = maxOf(screenHeightDp * 0.55f, SMALLEST_SPRITE_DP * 2)
+
+/**
+ * Längste Seite eines Sprites auf dem Bildschirm: winzig = so groß wie die runden Buttons,
+ * riesig = gut die halbe Bildschirmhöhe. Mit [scale] (Pilz-Wesen) bleibt es in derselben Spanne.
+ */
+fun spriteSizeDp(size: Int, screenHeightDp: Float, scale: Float = 1f): Float =
+    (stepSizeDp(size, screenHeightDp) * scale).coerceIn(SMALLEST_SPRITE_DP, largestSpriteDp(screenHeightDp))
+
+private fun stepSizeDp(size: Int, screenHeightDp: Float): Float {
+    val smallest = SMALLEST_SPRITE_DP
+    val largest = largestSpriteDp(screenHeightDp)
     val ratio = Math.pow((largest / smallest).toDouble(), 1.0 / 4).toFloat()
     return smallest * Math.pow(ratio.toDouble(), (size.coerceIn(1, 5) - 1).toDouble()).toFloat()
 }

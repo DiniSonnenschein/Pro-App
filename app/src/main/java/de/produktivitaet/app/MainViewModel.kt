@@ -26,6 +26,8 @@ sealed interface Screen {
     data object Overview : Screen
     data object Fungarium : Screen
     data class Celebration(val reward: Reward) : Screen
+    data object Settings : Screen
+    data object Statistics : Screen
 }
 
 enum class EditTarget { NEW, TASK, TEMPLATE }
@@ -37,7 +39,7 @@ fun windowId(screen: Screen): String? = when (screen) {
     Screen.Add -> "add"
     Screen.Editor -> "editor"
     is Screen.Draw -> if (screen.taskId != null) "draw" else "relax"
-    Screen.Fungarium, is Screen.Celebration -> null
+    Screen.Fungarium, is Screen.Celebration, Screen.Settings, Screen.Statistics -> null
 }
 
 /** Ein Pilz, den man im Pilz-Modus auswählen kann: ein platzierter oder eine Vorlagen-Kopie auf einer Aufgabe. */
@@ -291,6 +293,23 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         autoLayerFor = mushroom.id
     }
 
+    /** Einstellungen speichern; ist ein Ziel damit schon erreicht, gibt es gleich die Feier. */
+    fun saveGoals(daily: Goal, weekly: Goal) {
+        val reward = store.setGoals(daily, weekly)
+        back()
+        if (reward != null) open(Screen.Celebration(reward))
+    }
+
+    fun isBeing(id: DecorItemId): Boolean =
+        id is DecorItemId.Placed && store.findMushroom(id.mushroomId)?.let { catalog.isBeing(it.species) } == true
+
+    /** Pilz-Wesen im Pilz-Modus vergrößern ([factor] > 1) oder verkleinern. */
+    fun resizeBeing(id: DecorItemId, factor: Float) {
+        if (id !is DecorItemId.Placed || !isBeing(id)) return
+        val p = store.placementOf(id.mushroomId) ?: return
+        store.place(p.copy(scale = (p.scale * factor).coerceIn(0.3f, 3f)))
+    }
+
     fun mirror(id: DecorItemId) {
         if (id !is DecorItemId.Placed) return
         val p = store.placementOf(id.mushroomId) ?: return
@@ -343,6 +362,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     private val bitmaps = mutableStateMapOf<String, ImageBitmap>()
     private val loading = HashSet<String>()
+
+    private val shadowImages = HashMap<String, Pair<ImageBitmap, Float>?>()
+
+    /** Weicher Schatten eines Sprites (Bild + Randanteil); einmal berechnet, danach aus dem Speicher. */
+    fun shadowFor(species: String): Pair<ImageBitmap, Float>? = shadowImages.getOrPut(species) {
+        catalog.shadow(species)?.let { it.bitmap.asImageBitmap() to it.pad }
+    }
 
     /** Liefert das Bild in passender Auflösung; lädt es bei Bedarf im Hintergrund nach. */
     fun mushroomBitmap(species: String, heightPx: Float): ImageBitmap? {
