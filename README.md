@@ -36,13 +36,12 @@ Kotlin + Jetpack Compose, Daten liegen als JSON im App-Speicher (`daten.json`).
 Der Signaturschlüssel `app/produktivitaet.jks` liegt bewusst im Repository, damit jede
 gebaute Version als Update über die vorherige installiert werden kann.
 
-## Eigene Pilzbilder
+## Sprites (Pilze und Pilz-Wesen)
 
-Alle Pilzarten sind die Bilder im Ordner `app/src/main/assets/pilze/`.
-Der Dateiname ist der angezeigte Name, Unterstriche werden zu Leerzeichen
-(`Grüner_Knollenblätterpilz.png` → „Grüner Knollenblätterpilz“).
+Alle Sprites liegen im Ordner `app/src/main/assets/sprites/` (PNG mit transparentem Hintergrund).
 
-- PNG (oder WebP) mit transparentem Hintergrund, eng zugeschnitten, ca. 1500 px hoch
-- Bilder hinzufügen/ersetzen/löschen genügt – neue Arten erscheinen automatisch
-- Bereits erspielte Pilze einer entfernten Art bekommen beim nächsten Start
-  zufällig eine vorhandene Art (die Größe bleibt)
+- **Pilze:** `Name_Lateinischer Name.png`, z. B. `Fliegenpilz_Amanita muscaria.png`
+- **Pilz-Wesen:** `Name.png` – ohne Unterstrich
+- Durchsichtige Ränder werden automatisch abgeschnitten; die Größe richtet sich nach der längsten Seite
+- Ideal: höchstens ca. 1500 px an der längsten Seite
+- Bereits erspielte Pilze einer entfernten Art bekommen beim nächsten Start zufällig eine vorhandene Art
