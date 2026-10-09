@@ -292,7 +292,7 @@ class TaskStore(context: Context, private val catalog: MushroomCatalog) {
             val m = mushrooms[i]
             if (catalog.find(m.species) == null && catalog.mushrooms.isNotEmpty()) {
                 // Gleicher Name, nur andere Dateiendung (z. B. .png → .webp)? Dann dieselbe Art behalten.
-                val base = m.species.substringBeforeLast('.')
+                val base = m.species.substringBeforeLast('.').let { RENAMED[it] ?: it }
                 val same = catalog.species.firstOrNull { it.id.substringBeforeLast('.') == base }
                 mushrooms[i] = m.copy(species = same?.id ?: catalog.mushrooms.random().id)
                 changed = true
@@ -483,6 +483,16 @@ private fun JSONObject.toTask(): Task {
         hiddenCopies = if (hidden == null) emptySet() else (0 until hidden.length()).mapTo(HashSet()) { hidden.getLong(it) },
     )
 }
+
+/** Umbenannte Sprites (alter Name → neuer Name, ohne Endung), damit erspielte Pilze ihre Art behalten. */
+private val RENAMED = mapOf(
+    "Wiesen-Champignon_Agaricus campestris" to "Champignon_Agaricus bisporus",
+    "Glimmer-Tintling_Coprinellus micaceus" to "Faserling_Psathyrella",
+    "Parasol_Macrolepiota procera" to "Gemeiner Riesenschirmling_Macrolepiota procera",
+    "Rosablättriger Helmling_Mycena galericulata" to "Gesäter Tintling_Coprinellus disseminatus",
+    "Pfifferling_Cantharellus cibarius" to "Pfifferling_Cantharellus",
+    "Speisemorchel_Morchella esculenta" to "Morchel_Morchella",
+)
 
 /** Die vier Orte der ersten Version – wer die alle hatte, hatte "Überall" gewählt. */
 private val ORIGINAL_PLACES = setOf(Place.HOME, Place.TRANSIT, Place.CAFE, Place.CITY)
