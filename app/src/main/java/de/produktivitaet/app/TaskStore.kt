@@ -290,13 +290,18 @@ class TaskStore(context: Context, private val catalog: MushroomCatalog) {
         var changed = false
         for (i in mushrooms.indices) {
             val m = mushrooms[i]
-            if (catalog.find(m.species) == null && catalog.mushrooms.isNotEmpty()) {
-                // Gleicher Name, nur andere Dateiendung (z. B. .png → .webp)? Dann dieselbe Art behalten.
-                val base = m.species.substringBeforeLast('.').let { RENAMED[it] ?: it }
-                val same = catalog.species.firstOrNull { it.id.substringBeforeLast('.') == base }
-                mushrooms[i] = m.copy(species = same?.id ?: catalog.mushrooms.random().id)
-                changed = true
-            }
+            if (catalog.find(m.species) != null) continue
+            // Gleicher Name, nur andere Dateiendung (z. B. .png → .webp)? Dann dieselbe Art behalten.
+            val base = m.species.substringBeforeLast('.').let { RENAMED[it] ?: it }
+            val same = catalog.species.firstOrNull { it.id.substringBeforeLast('.') == base }
+            val replacement = when {
+                same != null -> same.id
+                // Ohne Unterstrich war es ein Pilz-Wesen: ein noch nicht gesammeltes nehmen.
+                '_' !in base -> rollBeing()
+                else -> catalog.mushrooms.randomOrNull()?.id
+            } ?: continue
+            mushrooms[i] = m.copy(species = replacement)
+            changed = true
         }
         val next = nextMushroom
         if (next == null || catalog.find(next.species)?.kind != SpriteKind.MUSHROOM) {
