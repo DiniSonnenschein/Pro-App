@@ -291,7 +291,10 @@ class TaskStore(context: Context, private val catalog: MushroomCatalog) {
         for (i in mushrooms.indices) {
             val m = mushrooms[i]
             if (catalog.find(m.species) == null && catalog.mushrooms.isNotEmpty()) {
-                mushrooms[i] = m.copy(species = catalog.mushrooms.random().id)
+                // Gleicher Name, nur andere Dateiendung (z. B. .png → .webp)? Dann dieselbe Art behalten.
+                val base = m.species.substringBeforeLast('.')
+                val same = catalog.species.firstOrNull { it.id.substringBeforeLast('.') == base }
+                mushrooms[i] = m.copy(species = same?.id ?: catalog.mushrooms.random().id)
                 changed = true
             }
         }
