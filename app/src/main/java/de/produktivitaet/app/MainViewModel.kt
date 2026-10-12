@@ -9,6 +9,7 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.lifecycle.AndroidViewModel
@@ -123,6 +124,9 @@ class EditorState(
         private fun draftOf(step: Step) = StepDraft(step.title, step.places, step.minutes.toString())
     }
 }
+
+/** Steuer-Buttons des Pilz-Modus werden nie eingefärbt. */
+private val NOT_PAINTABLE = setOf("pilz", "fertig", "pinsel")
 
 class MainViewModel(app: Application) : AndroidViewModel(app) {
     val catalog = MushroomCatalog(app)
@@ -302,7 +306,45 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         leaveDecorMode()
     }
 
+    // ---- Farben ----
+
+    /** Aktive Pinselfarbe im Pilz-Modus (Palettenindex) oder null. */
+    var brush by mutableStateOf<Int?>(null)
+
+    /** Farbe im Fungarium angetippt: zurück ins Fenster, Pilz-Modus mit dieser Farbe als Pinsel. */
+    fun pickColor(index: Int) {
+        back()
+        if (windowId(screen) == null) return
+        startDecorMode()
+        brush = index
+        selected = null
+    }
+
+    /** Einfärbung eines Buttons/einer Karte (über ihren Area-Schlüssel) oder null. */
+    fun tintColor(window: String, key: String): Color? =
+        store.tintOf(anchorForArea(window, key))?.let { Palette.color(it) }
+
+    fun windowTint(window: String): Color? = store.tintOf(Anchor.Window(window))?.let { Palette.color(it) }
+
+    /** Pinsel auf freie Stelle: kleinsten Button/Karte darunter einfärben, sonst den Fensterhintergrund. */
+    fun paintAt(win: DecorWindowState, point: Offset) {
+        val color = brush ?: return
+        var bestKey: String? = null
+        var bestArea = Float.MAX_VALUE
+        for ((key, info) in win.areas) {
+            if (key in NOT_PAINTABLE) continue
+            val r = info.rectInRoot.translate(-win.origin)
+            if (r.contains(point) && r.width * r.height < bestArea) {
+                bestArea = r.width * r.height
+                bestKey = key
+            }
+        }
+        val anchor = bestKey?.let { anchorForArea(win.window, it) } ?: Anchor.Window(win.window)
+        store.toggleTint(anchor, color)
+    }
+
     private fun leaveDecorMode() {
+        brush = null
         decorMode = false
         selected = null
         dragging = null

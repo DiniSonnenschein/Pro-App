@@ -42,6 +42,7 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
@@ -142,7 +143,7 @@ fun AppMenu(vm: MainViewModel) {
 
     Box {
         IconButton(onClick = { menuOpen = true }) {
-            Icon(Icons.Filled.MoreVert, "Mehr", tint = White)
+            Icon(Icons.Filled.MoreVert, "Mehr", tint = LocalContentColor.current)
         }
         DropdownMenu(
             expanded = menuOpen,
@@ -216,7 +217,7 @@ private fun BigRedButton(onClick: () -> Unit) {
             "Produktivität",
             fontSize = (maxWidth.value * 0.105f).sp,
             fontWeight = FontWeight.Bold,
-            color = White,
+            color = onColor(areaColor("produktivitaet", DarkRed)),
             maxLines = 1,
         )
     }
@@ -258,7 +259,7 @@ fun DrawScreen(vm: MainViewModel, taskId: Long?) {
             // Dieselbe Karte wie in der Übersicht – mit allen Pilzen, die auf der Aufgabe sitzen.
             TaskCard(task, dimPending = true, isTemplate = false, actionSlots = 3) {
                 IconButton(onClick = { vm.editTask(task) }) {
-                    Icon(Icons.Filled.Edit, "Bearbeiten", tint = White)
+                    Icon(Icons.Filled.Edit, "Bearbeiten", tint = LocalContentColor.current)
                 }
                 Spacer(Modifier.width(48.dp))
             }
@@ -300,16 +301,16 @@ fun OverviewScreen(vm: MainViewModel) {
                 selected = !showTemplates,
                 onClick = { vm.overviewTab = 0 },
                 text = { Text("Aufgaben (${vm.store.tasks.size})", fontSize = 16.sp) },
-                selectedContentColor = White,
-                unselectedContentColor = Muted,
+                selectedContentColor = onColor(areaColor("reiter-aufgaben", Black)),
+                unselectedContentColor = onColor(areaColor("reiter-aufgaben", Black)).copy(alpha = 0.6f),
                 modifier = Modifier.decoArea("reiter-aufgaben", RectangleShape, Black),
             )
             Tab(
                 selected = showTemplates,
                 onClick = { vm.overviewTab = 1 },
                 text = { Text("Vorlagen (${vm.store.templates.size})", fontSize = 16.sp) },
-                selectedContentColor = White,
-                unselectedContentColor = Muted,
+                selectedContentColor = onColor(areaColor("reiter-vorlagen", Black)),
+                unselectedContentColor = onColor(areaColor("reiter-vorlagen", Black)).copy(alpha = 0.6f),
                 modifier = Modifier.decoArea("reiter-vorlagen", RectangleShape, Black),
             )
         }

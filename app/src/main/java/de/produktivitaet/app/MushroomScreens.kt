@@ -7,6 +7,7 @@ import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -83,7 +84,7 @@ fun FungariumScreen(vm: MainViewModel) {
 
     Column(Modifier.fillMaxSize()) {
         TopBar("Fungarium", vm::back) {
-            if (!showBeings) {
+            if (tab == 0) {
                 // Schalter: welche Größe beim Herausnehmen zuerst kommt.
                 Box(
                     Modifier
@@ -101,19 +102,30 @@ fun FungariumScreen(vm: MainViewModel) {
         }
         TabRow(selectedTabIndex = tab, containerColor = Black, contentColor = White) {
             Tab(
-                selected = !showBeings,
+                selected = tab == 0,
                 onClick = { tab = 0 },
                 text = { Text("Pilze", fontSize = 16.sp) },
                 selectedContentColor = White,
                 unselectedContentColor = Muted,
             )
             Tab(
-                selected = showBeings,
+                selected = tab == 1,
                 onClick = { tab = 1 },
                 text = { Text("Pilz-Wesen", fontSize = 16.sp) },
                 selectedContentColor = White,
                 unselectedContentColor = Muted,
             )
+            Tab(
+                selected = tab == 2,
+                onClick = { tab = 2 },
+                text = { Text("Farben", fontSize = 16.sp) },
+                selectedContentColor = White,
+                unselectedContentColor = Muted,
+            )
+        }
+        if (tab == 2) {
+            PaletteTab(vm)
+            return@Column
         }
         LazyVerticalGrid(
             columns = GridCells.Fixed(3),
@@ -328,6 +340,9 @@ fun CelebrationScreen(vm: MainViewModel, reward: Reward) {
     var containerOffset by remember { mutableStateOf(Offset.Zero) }
     var mushroomCenter by remember { mutableStateOf(Offset.Zero) }
     var beingCenter by remember { mutableStateOf(Offset.Zero) }
+    var colorShown by remember { mutableStateOf(false) }
+    var colorCenter by remember { mutableStateOf(Offset.Zero) }
+    val colorPop = remember { Animatable(0f) }
 
     // Uhr für die Sporen; alte Wolken werden aufgeräumt.
     LaunchedEffect(Unit) {
@@ -357,18 +372,26 @@ fun CelebrationScreen(vm: MainViewModel, reward: Reward) {
                 withFrameNanos { bursts.add(burst(it, beingCenter - containerOffset, density, 110)) }
             }
         }
-        delay(1600)
+        if (reward.color != null) {
+            delay(1500)
+            colorShown = true
+            withFrameNanos { bursts.add(burst(it, colorCenter - containerOffset, density, 90)) }
+            colorPop.animateTo(1f, spring(dampingRatio = 0.45f, stiffness = Spring.StiffnessLow))
+        } else {
+            delay(1600)
+        }
         finished = true
     }
 
     // Solange etwas Neues gezeigt wird, sporen die Sprites weiter – bis der Bildschirm berührt wird.
-    LaunchedEffect(mushroomShown, beingShown) {
-        if (!mushroomShown && !beingShown) return@LaunchedEffect
+    LaunchedEffect(mushroomShown, beingShown, colorShown) {
+        if (!mushroomShown && !beingShown && !colorShown) return@LaunchedEffect
         while (true) {
             delay(700)
             withFrameNanos {
                 if (mushroomShown) bursts.add(burst(it, mushroomCenter - containerOffset, density, 28, power = 0.6f))
                 if (beingShown) bursts.add(burst(it, beingCenter - containerOffset, density, 28, power = 0.6f))
+                if (colorShown) bursts.add(burst(it, colorCenter - containerOffset, density, 22, power = 0.5f))
             }
         }
     }
@@ -396,6 +419,7 @@ fun CelebrationScreen(vm: MainViewModel, reward: Reward) {
                 silhouette = reward.mushroom?.species ?: reward.nextMushroom,
                 emptyText = null,
                 onCenter = { mushroomCenter = it },
+                imageSize = if (reward.color != null) 115.dp else 150.dp,
             )
             Spacer(Modifier.height(28.dp))
             RewardRow(
@@ -408,7 +432,32 @@ fun CelebrationScreen(vm: MainViewModel, reward: Reward) {
                 silhouette = reward.being?.species ?: reward.nextBeing,
                 emptyText = "Alle Pilz-Wesen gesammelt!",
                 onCenter = { beingCenter = it },
+                imageSize = if (reward.color != null) 115.dp else 150.dp,
             )
+            val newColor = reward.color
+            if (newColor != null) {
+                // Neue Farbe: ohne Fortschritt und ohne Vorschau – sie erscheint einfach.
+                Spacer(Modifier.height(24.dp))
+                Box(
+                    Modifier
+                        .size(64.dp)
+                        .onGloballyPositioned { colorCenter = it.boundsInRoot().center }
+                        .graphicsLayer {
+                            scaleX = colorPop.value
+                            scaleY = colorPop.value
+                        }
+                        .clip(CircleShape)
+                        .background(Palette.color(newColor))
+                        .border(1.dp, White, CircleShape),
+                )
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "Neue Farbe!",
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.alpha(if (colorShown) 1f else 0f),
+                )
+            }
             Spacer(Modifier.weight(1f))
             Text(
                 "Tippen zum Schließen",
@@ -501,6 +550,64 @@ private fun RewardRow(
             if (progress.alreadyRewarded) "${progress.goal.format(progress.after)} ✓" else progress.goal.format(progress.after),
             color = Muted,
             fontSize = 14.sp,
+        )
+    }
+}
+
+/**
+ * Reiter "Farben": freigeschaltete Farben als Kreise, 5 pro Reihe, lückenlos in Palettenreihenfolge
+ * (neue Farben schieben sich an ihren Platz). Antippen = Pilz-Modus mit dieser Farbe als Pinsel.
+ */
+@Composable
+private fun PaletteTab(vm: MainViewModel) {
+    val store = vm.store
+    val unlocked = store.unlockedColors.toSortedSet().toList()
+    var confirmReset by remember { mutableStateOf(false) }
+    LazyVerticalGrid(
+        columns = GridCells.Fixed(Palette.PER_ROW),
+        contentPadding = PaddingValues(16.dp),
+        horizontalArrangement = Arrangement.spacedBy(14.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        item(span = { GridItemSpan(maxLineSpan) }) {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                if (vm.decorMode) {
+                    Text("Tippe eine Farbe an und dann einen Button, eine Karte oder den Hintergrund.", fontSize = 14.sp)
+                }
+                Text("${unlocked.size} von ${Palette.size} Farben gefunden", color = Muted, fontSize = 15.sp)
+            }
+        }
+        items(unlocked, key = { it }) { index ->
+            val color = Palette.color(index)
+            Box(
+                Modifier
+                    .aspectRatio(1f)
+                    .clip(CircleShape)
+                    .background(color)
+                    .border(1.dp, if (vm.brush == index) White else Dim, CircleShape)
+                    .clickable { vm.pickColor(index) },
+            )
+        }
+        if (store.tints.isNotEmpty()) {
+            item(span = { GridItemSpan(maxLineSpan) }) {
+                OutlineButton(
+                    "Alles zurücksetzen",
+                    { confirmReset = true },
+                    Modifier.fillMaxWidth().padding(top = 12.dp),
+                )
+            }
+        }
+    }
+    if (confirmReset) {
+        ConfirmDialog(
+            title = "Alle Farben zurücksetzen?",
+            text = "Alle Einfärbungen von Buttons, Karten und Hintergründen werden entfernt. Deine gesammelten Farben bleiben.",
+            confirmText = "Zurücksetzen",
+            onConfirm = {
+                store.resetTints()
+                confirmReset = false
+            },
+            onDismiss = { confirmReset = false },
         )
     }
 }

@@ -17,6 +17,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -211,7 +212,7 @@ fun Modifier.decoArea(key: String?, shape: Shape, background: Color): Modifier =
         }
         .drawWithContent {
             val outline = shape.createOutline(size, layoutDirection, this)
-            drawOutline(outline, background)
+            drawOutline(outline, vm.tintColor(win.window, key) ?: background)
             val items = areaDecor(vm, win.window, key)
             if (items.isNotEmpty()) {
                 val path = Path().apply { addOutline(outline) }
@@ -242,7 +243,12 @@ fun DecoratedWindow(vm: MainViewModel, window: String, content: @Composable () -
     val state = remember(window) { DecorWindowState(window) }
     val density = LocalDensity.current.density
     val screenHeightDp = LocalConfiguration.current.screenHeightDp.toFloat()
-    CompositionLocalProvider(LocalDecorWindow provides state) {
+    val windowColor = vm.windowTint(window)
+    // Schrift und Symbole ohne eigene Farbe passen sich dem (ggf. eingefärbten) Hintergrund an.
+    CompositionLocalProvider(
+        LocalDecorWindow provides state,
+        LocalContentColor provides onColor(windowColor ?: Black),
+    ) {
         Box(
             Modifier
                 .fillMaxSize()
@@ -252,6 +258,7 @@ fun DecoratedWindow(vm: MainViewModel, window: String, content: @Composable () -
                     vm.windowSizesDp[window] = Offset(it.size.width / density, it.size.height / density)
                 }
                 .drawBehind {
+                    vm.windowTint(window)?.let { drawRect(it) }
                     for (p in vm.store.placements) {
                         val a = p.anchor
                         if (a !is Anchor.Window || a.window != window) continue
@@ -358,10 +365,16 @@ private fun DecorOverlay(vm: MainViewModel, win: DecorWindowState) {
                     } else if (!scrolling) {
                         val mushroomButton = win.areaRect("pilz")
                         val doneButton = win.areaRect("fertig")
+                        val brushButton = win.areaRect("pinsel")
                         when {
                             doneButton != null && doneButton.contains(start) -> vm.confirmDecor()
+                            brushButton != null && brushButton.contains(start) -> vm.brush = null
                             hit != null -> vm.selected = hit.id
                             mushroomButton != null && mushroomButton.contains(start) -> vm.open(Screen.Fungarium)
+                            vm.brush != null -> {
+                                vm.selected = null
+                                vm.paintAt(win, start)
+                            }
                             else -> vm.selected = null
                         }
                     }

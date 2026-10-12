@@ -147,6 +147,8 @@ data class Reward(
     /** Silhouetten, falls nichts Neues erspielt wurde. null = keins mehr übrig. */
     val nextMushroom: String?,
     val nextBeing: String?,
+    /** Neu gewonnene Palettenfarbe (Index) oder null. */
+    val color: Int? = null,
 )
 
 object Rewards {

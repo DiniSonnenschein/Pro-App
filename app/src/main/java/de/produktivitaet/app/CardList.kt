@@ -28,6 +28,7 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -243,18 +244,18 @@ fun CardList(vm: MainViewModel, forTemplates: Boolean, poolId: Long?, modifier: 
                             TaskCard(task, dimPending = !forTemplates, isTemplate = forTemplates, actionSlots = 3) {
                                 if (forTemplates) {
                                     IconButton(onClick = { vm.newTask(task) }) {
-                                        Icon(Icons.Filled.Add, "Aufgabe aus dieser Vorlage erstellen", tint = LightBlue)
+                                        Icon(Icons.Filled.Add, "Aufgabe aus dieser Vorlage erstellen", tint = cardAccent())
                                     }
                                 } else {
                                     IconButton(onClick = { toComplete = task }) {
-                                        Icon(Icons.Filled.Check, "Erledigt", tint = LightBlue)
+                                        Icon(Icons.Filled.Check, "Erledigt", tint = cardAccent())
                                     }
                                 }
                                 IconButton(onClick = { if (forTemplates) vm.editTemplate(task) else vm.editTask(task) }) {
-                                    Icon(Icons.Filled.Edit, "Bearbeiten", tint = White)
+                                    Icon(Icons.Filled.Edit, "Bearbeiten", tint = LocalContentColor.current)
                                 }
                                 IconButton(onClick = { toDelete = task }) {
-                                    Icon(Icons.Filled.Delete, "Löschen", tint = White)
+                                    Icon(Icons.Filled.Delete, "Löschen", tint = LocalContentColor.current)
                                 }
                             }
                         }
@@ -424,11 +425,11 @@ private fun PainterCircleButton(res: Int, description: String, onClick: () -> Un
             .size(44.dp)
             .decoArea(decoKey, CircleShape, Black)
             .clip(CircleShape)
-            .border(1.dp, White, CircleShape)
+            .border(1.dp, onColor(areaColor(decoKey, Black)), CircleShape)
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
-        Icon(painterResource(res), description, tint = White, modifier = Modifier.size(22.dp))
+        Icon(painterResource(res), description, tint = onColor(areaColor(decoKey, Black)), modifier = Modifier.size(22.dp))
     }
 }
 
@@ -442,29 +443,30 @@ private fun PoolCard(
     onEdit: () -> Unit,
     onDelete: () -> Unit,
 ) {
+    val fg = onColor(areaColor(poolKey(pool.id), Black))
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .decoArea(poolKey(pool.id), CardShape, Black)
             .clip(CardShape)
-            .border(if (highlighted) 3.dp else 1.dp, if (highlighted) LightBlue else White, CardShape)
+            .border(if (highlighted) 3.dp else 1.dp, if (highlighted) LightBlue else fg, CardShape)
             .clickable(onClick = onOpen)
             .padding(start = 16.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(painterResource(R.drawable.ic_ordner), "Pool", tint = White, modifier = Modifier.size(26.dp))
+        Icon(painterResource(R.drawable.ic_ordner), "Pool", tint = fg, modifier = Modifier.size(26.dp))
         Spacer(Modifier.width(12.dp))
-        Text(pool.name, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+        Text(pool.name, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, color = fg, modifier = Modifier.weight(1f))
         Box(
             Modifier
                 .clip(CircleShape)
-                .border(1.dp, Muted, CircleShape)
+                .border(1.dp, fg.copy(alpha = 0.65f), CircleShape)
                 .padding(horizontal = 10.dp, vertical = 3.dp),
         ) {
-            Text("$count", fontSize = 14.sp, color = Muted)
+            Text("$count", fontSize = 14.sp, color = fg.copy(alpha = 0.65f))
         }
-        IconButton(onClick = onEdit) { Icon(Icons.Filled.Edit, "Umbenennen", tint = White) }
-        IconButton(onClick = onDelete) { Icon(Icons.Filled.Delete, "Löschen", tint = White) }
+        IconButton(onClick = onEdit) { Icon(Icons.Filled.Edit, "Umbenennen", tint = fg) }
+        IconButton(onClick = onDelete) { Icon(Icons.Filled.Delete, "Löschen", tint = fg) }
     }
 }
 

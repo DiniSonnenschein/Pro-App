@@ -10,6 +10,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.time.LocalDate
+import kotlin.random.Random
 
 /** Hält Aufgaben, Vorlagen, Ziele, Sprites und deren Platzierungen und speichert alles als JSON-Datei. */
 class TaskStore(context: Context, private val catalog: MushroomCatalog) {
@@ -40,8 +41,15 @@ class TaskStore(context: Context, private val catalog: MushroomCatalog) {
     /** Pools (Ordner) der Übersicht. */
     val pools = mutableStateListOf<Pool>()
 
+    /** Freigeschaltete Palettenfarben (Indizes). */
+    val unlockedColors = mutableStateListOf<Int>().apply { addAll(Palette.STARTERS.sorted()) }
+
+    /** Eingefärbte Buttons, Karten und Fensterhintergründe. */
+    val tints = mutableStateListOf<Tint>()
+
     /** Stand der Platzierungen (und gelöschten Kopien) beim Start des Pilz-Modus; null = kein Entwurf. */
     private var draft: Pair<List<Placement>, Map<Long, Set<Long>>>? = null
+    private var draftTints: List<Tint> = emptyList()
 
     // Achtung: Alle Eigenschaften müssen VOR diesem init-Block stehen, sonst sind sie beim Laden noch null.
     init {
@@ -114,6 +122,14 @@ class TaskStore(context: Context, private val catalog: MushroomCatalog) {
         val contained = cards(pool.forTemplates).filter { it.poolId == id }.map { it.id }.toSet()
         cards(pool.forTemplates).removeAll { it.id in contained }
         val window = poolWindow(id)
+        fun belongsToPool(a: Anchor) = when (a) {
+            is Anchor.OnTask -> !pool.forTemplates && a.taskId in contained
+            is Anchor.OnTemplate -> pool.forTemplates && a.templateId in contained
+            is Anchor.OnPool -> a.poolId == id
+            is Anchor.Window -> a.window == window
+            is Anchor.Area -> a.window == window
+        }
+        tints.removeAll { belongsToPool(it.anchor) }
         placements.removeAll { p ->
             when (val a = p.anchor) {
                 is Anchor.OnTask -> !pool.forTemplates && a.taskId in contained
@@ -173,6 +189,7 @@ class TaskStore(context: Context, private val catalog: MushroomCatalog) {
     fun deleteTask(id: Long) {
         tasks.removeAll { it.id == id }
         placements.removeAll { it.anchor == Anchor.OnTask(id) }
+        tints.removeAll { it.anchor == Anchor.OnTask(id) }
         save()
     }
 
@@ -180,6 +197,7 @@ class TaskStore(context: Context, private val catalog: MushroomCatalog) {
     fun deleteTemplate(id: Long) {
         templates.removeAll { it.id == id }
         placements.removeAll { it.anchor == Anchor.OnTemplate(id) }
+        tints.removeAll { it.anchor == Anchor.OnTemplate(id) }
         save()
     }
 
@@ -194,7 +212,9 @@ class TaskStore(context: Context, private val catalog: MushroomCatalog) {
         val task = tasks[i]
         val today = LocalDate.now().toEpochDay()
         val (dayBefore, weekBefore) = currentProgress(today)
+        val doneToday = completions.count { it.epochDay == today }
         completions.add(Completion(today, task.currentStep.minutes))
+        val color = rollColor(task.currentStep.minutes, doneToday)
 
         val next = task.advanced()
         if (next != null) {
@@ -202,8 +222,9 @@ class TaskStore(context: Context, private val catalog: MushroomCatalog) {
         } else {
             tasks.removeAt(i)
             placements.removeAll { it.anchor == Anchor.OnTask(id) }
+            tints.removeAll { it.anchor == Anchor.OnTask(id) }
         }
-        val reward = evaluate(today, dayBefore, weekBefore)
+        val reward = evaluate(today, dayBefore, weekBefore).copy(color = color)
         save()
         return reward
     }
@@ -323,11 +344,47 @@ class TaskStore(context: Context, private val catalog: MushroomCatalog) {
         save()
     }
 
+    // ---- Farben ----
+
+    /** Mit etwas Glück eine noch nicht freigeschaltete Farbe gewinnen (höchstens eine pro Schritt). */
+    private fun rollColor(minutes: Int, doneTodayBefore: Int): Int? {
+        val locked = (0 until Palette.size).filter { it !in unlockedColors }
+        if (locked.isEmpty() || Random.nextDouble() >= colorChance(minutes, doneTodayBefore)) return null
+        return locked.random().also { unlockedColors.add(it) }
+    }
+
+    /** Farbe einer Einfärbung; Aufgabenkarten erben sonst die Farbe ihrer Vorlage. */
+    fun tintOf(anchor: Anchor): Int? {
+        tints.firstOrNull { it.anchor == anchor }?.let { return it.color }
+        if (anchor is Anchor.OnTask) {
+            val templateId = findTask(anchor.taskId)?.templateId ?: return null
+            return tints.firstOrNull { it.anchor == Anchor.OnTemplate(templateId) }?.color
+        }
+        return null
+    }
+
+    /** Pinsel: einfärben; dieselbe Farbe nochmal macht es rückgängig, eine andere färbt um. */
+    fun toggleTint(anchor: Anchor, color: Int) {
+        val i = tints.indexOfFirst { it.anchor == anchor }
+        when {
+            i >= 0 && tints[i].color == color -> tints.removeAt(i)
+            i >= 0 -> tints[i] = Tint(anchor, color)
+            else -> tints.add(Tint(anchor, color))
+        }
+        save()
+    }
+
+    fun resetTints() {
+        tints.clear()
+        save()
+    }
+
     // ---- Entwurf im Pilz-Modus ----
 
     /** Ab jetzt ist alles Entwurf: wird angezeigt, aber erst mit [commitDraft] gespeichert. */
     fun beginDraft() {
         draft = placements.toList() to tasks.associate { it.id to it.hiddenCopies }
+        draftTints = tints.toList()
     }
 
     /** Haken: Entwurf übernehmen. */
@@ -341,6 +398,8 @@ class TaskStore(context: Context, private val catalog: MushroomCatalog) {
         val (oldPlacements, oldHidden) = draft ?: return
         placements.clear()
         placements.addAll(oldPlacements)
+        tints.clear()
+        tints.addAll(draftTints)
         for (i in tasks.indices) {
             val hidden = oldHidden[tasks[i].id] ?: continue
             if (tasks[i].hiddenCopies != hidden) tasks[i] = tasks[i].copy(hiddenCopies = hidden)
@@ -457,6 +516,8 @@ class TaskStore(context: Context, private val catalog: MushroomCatalog) {
         val placements: List<Placement>,
         val bigFirst: Boolean,
         val pools: List<Pool>,
+        val unlockedColors: List<Int>,
+        val tints: List<Tint>,
     )
 
     private fun replaceWith(data: Data) {
@@ -479,10 +540,16 @@ class TaskStore(context: Context, private val catalog: MushroomCatalog) {
         bigFirst = data.bigFirst
         pools.clear()
         pools.addAll(data.pools)
+        unlockedColors.clear()
+        unlockedColors.addAll(data.unlockedColors)
+        tints.clear()
+        tints.addAll(data.tints)
     }
 
     private fun toJson(): JSONObject = JSONObject()
-        .put("version", 5)
+        .put("version", 6)
+        .put("colors", JSONArray().apply { unlockedColors.forEach { put(it) } })
+        .put("tints", JSONArray().apply { tints.forEach { put(JSONObject().put("anchor", it.anchor.toJson()).put("color", it.color)) } })
         .put("pools", JSONArray().apply {
             pools.forEach { put(JSONObject().put("id", it.id).put("name", it.name).put("forTemplates", it.forTemplates).put("sortKey", it.sortKey)) }
         })
@@ -510,6 +577,13 @@ class TaskStore(context: Context, private val catalog: MushroomCatalog) {
             next = next?.let { MushroomRoll(it.getString("species"), it.getInt("size").coerceIn(1, 5)) },
             placements = root.optJSONArray("placements").mapObjects { it.toPlacement() }.filterNotNull(),
             bigFirst = root.optBoolean("bigFirst", true),
+            unlockedColors = root.optJSONArray("colors").let { arr ->
+                val saved = if (arr == null) emptyList() else (0 until arr.length()).map { arr.getInt(it) }
+                (Palette.STARTERS + saved).filter { it in 0 until Palette.size }.distinct()
+            },
+            tints = root.optJSONArray("tints").mapObjects { o ->
+                o.getJSONObject("anchor").toAnchor()?.let { Tint(it, o.getInt("color")) }
+            }.filterNotNull().filter { it.color in 0 until Palette.size },
             pools = root.optJSONArray("pools").mapObjects {
                 Pool(it.getLong("id"), it.getString("name"), it.optBoolean("forTemplates"), it.optLong("sortKey", 0))
             },
@@ -561,17 +635,27 @@ private fun Mushroom.toJson(): JSONObject = JSONObject()
     .put("species", species)
     .put("size", size)
 
+private fun Anchor.toJson(): JSONObject = when (val anchor = this) {
+    is Anchor.Window -> JSONObject().put("type", "window").put("window", anchor.window)
+    is Anchor.Area -> JSONObject().put("type", "area").put("window", anchor.window).put("key", anchor.key)
+    is Anchor.OnTask -> JSONObject().put("type", "task").put("id", anchor.taskId)
+    is Anchor.OnTemplate -> JSONObject().put("type", "template").put("id", anchor.templateId)
+    is Anchor.OnPool -> JSONObject().put("type", "pool").put("id", anchor.poolId)
+}
+
+private fun JSONObject.toAnchor(): Anchor? = when (getString("type")) {
+    "window" -> Anchor.Window(getString("window"))
+    "area" -> Anchor.Area(getString("window"), getString("key"))
+    "task" -> Anchor.OnTask(getLong("id"))
+    "template" -> Anchor.OnTemplate(getLong("id"))
+    "pool" -> Anchor.OnPool(getLong("id"))
+    else -> null
+}
+
 private fun Placement.toJson(): JSONObject {
-    val a = when (val anchor = anchor) {
-        is Anchor.Window -> JSONObject().put("type", "window").put("window", anchor.window)
-        is Anchor.Area -> JSONObject().put("type", "area").put("window", anchor.window).put("key", anchor.key)
-        is Anchor.OnTask -> JSONObject().put("type", "task").put("id", anchor.taskId)
-        is Anchor.OnTemplate -> JSONObject().put("type", "template").put("id", anchor.templateId)
-        is Anchor.OnPool -> JSONObject().put("type", "pool").put("id", anchor.poolId)
-    }
     return JSONObject()
         .put("mushroomId", mushroomId)
-        .put("anchor", a)
+        .put("anchor", anchor.toJson())
         .put("x", x.toDouble())
         .put("y", y.toDouble())
         .put("mirrored", mirrored)
@@ -579,15 +663,7 @@ private fun Placement.toJson(): JSONObject {
 }
 
 private fun JSONObject.toPlacement(): Placement? {
-    val a = getJSONObject("anchor")
-    val anchor = when (a.getString("type")) {
-        "window" -> Anchor.Window(a.getString("window"))
-        "area" -> Anchor.Area(a.getString("window"), a.getString("key"))
-        "task" -> Anchor.OnTask(a.getLong("id"))
-        "template" -> Anchor.OnTemplate(a.getLong("id"))
-        "pool" -> Anchor.OnPool(a.getLong("id"))
-        else -> return null
-    }
+    val anchor = getJSONObject("anchor").toAnchor() ?: return null
     return Placement(
         mushroomId = getLong("mushroomId"),
         anchor = anchor,

@@ -33,6 +33,8 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -107,6 +109,15 @@ fun ProduktivitaetTheme(content: @Composable () -> Unit) {
     )
 }
 
+/** Hintergrundfarbe eines Buttons/einer Karte: eingefärbt (Farbpalette) oder [default]. */
+@Composable
+fun areaColor(key: String?, default: Color): Color {
+    if (key == null) return default
+    val win = LocalDecorWindow.current ?: return default
+    val vm = LocalAppViewModel.current ?: return default
+    return vm.tintColor(win.window, key) ?: default
+}
+
 /** Standard-Schalter: schwarz mit dünner weißer Umrandung. */
 @Composable
 fun OutlineButton(
@@ -117,17 +128,18 @@ fun OutlineButton(
     icon: ImageVector? = null,
     decoKey: String? = null,
 ) {
+    val fg = onColor(areaColor(decoKey, Black))
     OutlinedButton(
         onClick = onClick,
         modifier = modifier.heightIn(min = 52.dp).decoArea(decoKey, FieldShape, Black),
         enabled = enabled,
         shape = FieldShape,
-        border = BorderStroke(1.dp, if (enabled) White else Dim),
+        border = BorderStroke(1.dp, if (enabled) fg else fg.copy(alpha = 0.35f)),
         colors = ButtonDefaults.outlinedButtonColors(
             containerColor = Color.Transparent,
-            contentColor = White,
+            contentColor = fg,
             disabledContainerColor = Color.Transparent,
-            disabledContentColor = Dim,
+            disabledContentColor = fg.copy(alpha = 0.35f),
         ),
     ) {
         if (icon != null) {
@@ -141,11 +153,15 @@ fun OutlineButton(
 /** Farbige Schalter im Aufgabenfenster. */
 @Composable
 fun ColorButton(text: String, color: Color, textColor: Color, decoKey: String, onClick: () -> Unit) {
+    val bg = areaColor(decoKey, color)
     Button(
         onClick = onClick,
         modifier = Modifier.fillMaxWidth().height(60.dp).decoArea(decoKey, CardShape, color),
         shape = CardShape,
-        colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent, contentColor = textColor),
+        colors = ButtonDefaults.buttonColors(
+            containerColor = Color.Transparent,
+            contentColor = if (bg == color) textColor else onColor(bg),
+        ),
     ) {
         Text(text, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
     }
@@ -164,11 +180,11 @@ fun CircleIconButton(
             .size(size)
             .decoArea(decoKey, CircleShape, Black)
             .clip(CircleShape)
-            .border(1.dp, White, CircleShape)
+            .border(1.dp, onColor(areaColor(decoKey, Black)), CircleShape)
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
-        Icon(icon, contentDescription, tint = White, modifier = Modifier.size(size * 0.45f))
+        Icon(icon, contentDescription, tint = onColor(areaColor(decoKey, Black)), modifier = Modifier.size(size * 0.45f))
     }
 }
 
@@ -230,8 +246,22 @@ fun MushroomControls(vm: MainViewModel, size: Dp) {
         ) {
             Icon(Icons.Filled.Check, "Fertig", tint = Black, modifier = Modifier.size(size * 0.5f))
         }
-        // Gleicht den kleinen Pilz-Button aus, damit der Haken mittig sitzt.
-        Spacer(Modifier.width(14.dp + size * 0.7f))
+        Spacer(Modifier.width(14.dp))
+        val brush = vm.brush
+        if (brush != null) {
+            // Aktive Pinselfarbe; Antippen legt den Pinsel weg.
+            Box(
+                Modifier
+                    .size(size * 0.7f)
+                    .decoArea("pinsel", CircleShape, Palette.color(brush))
+                    .clip(CircleShape)
+                    .border(2.dp, White, CircleShape)
+                    .clickable { vm.brush = null },
+            )
+        } else {
+            // Gleicht den kleinen Pilz-Button aus, damit der Haken mittig sitzt.
+            Spacer(Modifier.width(size * 0.7f))
+        }
     }
 }
 
@@ -291,21 +321,21 @@ fun MushroomImage(
 }
 
 @Composable
-private fun fieldColors() = OutlinedTextFieldDefaults.colors(
-    focusedTextColor = White,
-    unfocusedTextColor = White,
-    // Den schwarzen Hintergrund zeichnet decoArea – so liegen Pilze zwischen Hintergrund und Text.
+private fun fieldColors(fg: Color = White) = OutlinedTextFieldDefaults.colors(
+    focusedTextColor = fg,
+    unfocusedTextColor = fg,
+    // Den Hintergrund zeichnet decoArea – so liegen Pilze zwischen Hintergrund und Text.
     focusedContainerColor = Color.Transparent,
     unfocusedContainerColor = Color.Transparent,
-    focusedBorderColor = White,
-    unfocusedBorderColor = Muted,
-    focusedLabelColor = White,
-    unfocusedLabelColor = Muted,
-    cursorColor = White,
-    focusedSuffixColor = Muted,
-    unfocusedSuffixColor = Muted,
-    focusedTrailingIconColor = White,
-    unfocusedTrailingIconColor = Muted,
+    focusedBorderColor = fg,
+    unfocusedBorderColor = fg.copy(alpha = 0.6f),
+    focusedLabelColor = fg,
+    unfocusedLabelColor = fg.copy(alpha = 0.6f),
+    cursorColor = fg,
+    focusedSuffixColor = fg.copy(alpha = 0.6f),
+    unfocusedSuffixColor = fg.copy(alpha = 0.6f),
+    focusedTrailingIconColor = fg,
+    unfocusedTrailingIconColor = fg.copy(alpha = 0.6f),
 )
 
 @Composable
@@ -325,7 +355,7 @@ fun TextInput(
         suffix = if (suffix != null) { { Text(suffix) } } else null,
         singleLine = true,
         shape = FieldShape,
-        colors = fieldColors(),
+        colors = fieldColors(onColor(areaColor(decoKey, Black))),
         keyboardOptions = KeyboardOptions(
             capitalization = if (numeric) KeyboardCapitalization.None else KeyboardCapitalization.Sentences,
             keyboardType = if (numeric) KeyboardType.Number else KeyboardType.Text,
@@ -353,7 +383,7 @@ fun SelectField(
             singleLine = true,
             trailingIcon = { Icon(Icons.Filled.ArrowDropDown, contentDescription = null) },
             shape = FieldShape,
-            colors = fieldColors(),
+            colors = fieldColors(onColor(areaColor(decoKey, Black))),
             modifier = Modifier.fillMaxWidth(),
         )
         Box(Modifier.matchParentSize().clickable(onClick = onClick))
@@ -482,12 +512,17 @@ fun TaskCard(
     onClick: (() -> Unit)? = null,
     actions: (@Composable RowScope.() -> Unit)? = null,
 ) {
+    val key = if (isTemplate) templateKey(task.id) else taskKey(task.id)
+    val fg = onColor(areaColor(key, Black))
+    val muted = fg.copy(alpha = 0.65f)
+    val dim = fg.copy(alpha = 0.38f)
+    CompositionLocalProvider(LocalContentColor provides fg) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .decoArea(if (isTemplate) templateKey(task.id) else taskKey(task.id), CardShape, Black)
+            .decoArea(key, CardShape, Black)
             .clip(CardShape)
-            .border(1.dp, White, CardShape)
+            .border(1.dp, fg, CardShape)
             .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
             .padding(start = 16.dp, end = 4.dp, top = 12.dp, bottom = 14.dp),
     ) {
@@ -511,19 +546,24 @@ fun TaskCard(
             }
         }
         if (task.totalSteps == 1) {
-            Text(stepInfo(task.currentStep), color = Muted, fontSize = 14.sp)
+            Text(stepInfo(task.currentStep), color = muted, fontSize = 14.sp)
         } else {
             task.steps.forEachIndexed { i, step ->
                 val number = task.completedSteps + i + 1
                 val active = !dimPending || i == 0
                 Row(Modifier.padding(top = 6.dp, end = 12.dp)) {
-                    Text("$number.", color = if (active) White else Dim, fontSize = 15.sp, modifier = Modifier.width(28.dp))
+                    Text("$number.", color = if (active) fg else dim, fontSize = 15.sp, modifier = Modifier.width(28.dp))
                     Column {
-                        Text(step.title.ifBlank { "Schritt $number" }, color = if (active) White else Dim, fontSize = 15.sp)
-                        Text(stepInfo(step), color = if (active) Muted else Dim, fontSize = 13.sp)
+                        Text(step.title.ifBlank { "Schritt $number" }, color = if (active) fg else dim, fontSize = 15.sp)
+                        Text(stepInfo(step), color = if (active) muted else dim, fontSize = 13.sp)
                     }
                 }
             }
         }
     }
+    }
 }
+
+/** Akzentfarbe für Symbole auf Karten: hellblau auf dunklem Grund, sonst die Schriftfarbe. */
+@Composable
+fun cardAccent(): Color = if (LocalContentColor.current == White) LightBlue else LocalContentColor.current

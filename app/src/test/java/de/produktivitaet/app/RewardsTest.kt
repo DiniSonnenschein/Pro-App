@@ -70,3 +70,34 @@ class DecorRulesTest {
         assertEquals(Anchor.Area("home", "plus"), anchorForArea("home", "plus"))
     }
 }
+
+class PaletteTest {
+    @Test
+    fun paletteHasHundredColorsInRowsOfFive() {
+        assertEquals(100, Palette.size)
+        assertEquals(5, Palette.STARTERS.size)
+        assertTrue(Palette.STARTERS.all { it in 0 until Palette.size })
+    }
+
+    @Test
+    fun startersAreTheAppColors() {
+        val colors = Palette.STARTERS.map { Palette.color(it) }.toSet()
+        assertTrue(White in colors && Black in colors && DarkRed in colors && LightBlue in colors && DarkGreen in colors)
+    }
+
+    @Test
+    fun textColorIsReadable() {
+        assertEquals(Black, onColor(White))
+        assertEquals(White, onColor(Black))
+        assertEquals(White, onColor(DarkRed))
+        assertEquals(Black, onColor(LightBlue))
+    }
+
+    @Test
+    fun colorChanceGrowsWithMinutesAndTasksToday() {
+        assertEquals(0.10, colorChance(0, 0), 1e-9)
+        assertEquals(0.13, colorChance(30, 0), 1e-9)
+        assertEquals(0.15, colorChance(0, 5), 1e-9)
+        assertEquals(1.0, colorChance(5000, 0), 1e-9)
+    }
+}
