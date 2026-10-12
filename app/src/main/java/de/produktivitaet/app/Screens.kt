@@ -289,13 +289,7 @@ fun DrawScreen(vm: MainViewModel, taskId: Long?) {
 
 @Composable
 fun OverviewScreen(vm: MainViewModel) {
-    // Paar aus zu löschendem Eintrag und ob es eine Vorlage ist.
-    var toDelete by remember { mutableStateOf<Pair<Task, Boolean>?>(null) }
-    var toComplete by remember { mutableStateOf<Task?>(null) }
     val showTemplates = vm.overviewTab == 1
-    val list = if (showTemplates) vm.store.templates else vm.store.tasks
-    val listState = remember(showTemplates) { androidx.compose.foundation.lazy.LazyListState() }
-    RegisterDecorScroll(listState)
 
     Column(Modifier.fillMaxSize()) {
         TopBar("Übersicht", vm::back) {
@@ -319,87 +313,10 @@ fun OverviewScreen(vm: MainViewModel) {
                 modifier = Modifier.decoArea("reiter-vorlagen", RectangleShape, Black),
             )
         }
-        LazyColumn(
-            state = listState,
-            modifier = Modifier.weight(1f),
-            contentPadding = PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            if (!showTemplates) {
-                item {
-                    OutlineButton(
-                        text = "Aufgabe hinzufügen",
-                        onClick = { vm.newTask() },
-                        modifier = Modifier.fillMaxWidth(),
-                        icon = Icons.Filled.Add,
-                        decoKey = "aufgabe-neu",
-                    )
-                }
-            }
-            if (list.isEmpty()) {
-                item {
-                    Text(
-                        if (showTemplates) "Noch keine Vorlagen gespeichert. Setze beim Erstellen einer Aufgabe das Häkchen bei „Als Vorlage speichern“." else "Noch keine Aufgaben.",
-                        color = Muted,
-                        fontSize = 15.sp,
-                    )
-                }
-            }
-            items(list, key = { it.id }) { item ->
-                TaskCard(item, dimPending = !showTemplates, isTemplate = showTemplates, actionSlots = 3) {
-                    if (showTemplates) {
-                        IconButton(onClick = { vm.newTask(item) }) {
-                            Icon(Icons.Filled.Add, "Aufgabe aus dieser Vorlage erstellen", tint = LightBlue)
-                        }
-                    } else {
-                        IconButton(onClick = { toComplete = item }) {
-                            Icon(Icons.Filled.Check, "Erledigt", tint = LightBlue)
-                        }
-                    }
-                    IconButton(onClick = { if (showTemplates) vm.editTemplate(item) else vm.editTask(item) }) {
-                        Icon(Icons.Filled.Edit, "Bearbeiten", tint = White)
-                    }
-                    IconButton(onClick = { toDelete = item to showTemplates }) {
-                        Icon(Icons.Filled.Delete, "Löschen", tint = White)
-                    }
-                }
-            }
+        key(showTemplates) {
+            CardList(vm, forTemplates = showTemplates, poolId = null, modifier = Modifier.weight(1f))
         }
         MushroomBar(vm)
-    }
-
-    toComplete?.let { task ->
-        val stepText = if (task.totalSteps > 1) {
-            "Schritt ${task.completedSteps + 1} von ${task.totalSteps} von „${task.title}“"
-        } else {
-            "„${task.title}“"
-        }
-        ConfirmDialog(
-            title = "Erledigt?",
-            text = "$stepText als erledigt markieren?",
-            confirmText = "Erledigt",
-            confirmColor = LightBlue,
-            confirmTextColor = Black,
-            onConfirm = {
-                toComplete = null
-                vm.completeStep(task.id, fromOverview = true)
-            },
-            onDismiss = { toComplete = null },
-        )
-    }
-
-    toDelete?.let { (item, isTemplate) ->
-        ConfirmDialog(
-            title = if (isTemplate) "Vorlage löschen?" else "Aufgabe löschen?",
-            text = "„${item.title}“ wird endgültig gelöscht." +
-                if (isTemplate) " Ihre Pilze kommen zurück ins Fungarium." else "",
-            confirmText = "Löschen",
-            onConfirm = {
-                if (isTemplate) vm.store.deleteTemplate(item.id) else vm.store.deleteTask(item.id)
-                toDelete = null
-            },
-            onDismiss = { toDelete = null },
-        )
     }
 }
 
@@ -409,6 +326,7 @@ fun EditorScreen(vm: MainViewModel) {
     var placesFor by remember { mutableStateOf<StepDraft?>(null) }
     val screenTitle = when (editor.target) {
         EditTarget.NEW -> "Neue Aufgabe"
+        EditTarget.NEW_TEMPLATE -> "Neue Vorlage"
         EditTarget.TASK -> "Aufgabe bearbeiten"
         EditTarget.TEMPLATE -> "Vorlage bearbeiten"
     }
@@ -486,7 +404,7 @@ fun EditorScreen(vm: MainViewModel) {
                 Text(it, color = Muted, fontSize = 14.sp, modifier = Modifier.padding(bottom = 8.dp))
             }
             OutlineButton(
-                text = if (editor.target == EditTarget.NEW) "Hinzufügen" else "Speichern",
+                text = if (editor.target == EditTarget.NEW || editor.target == EditTarget.NEW_TEMPLATE) "Hinzufügen" else "Speichern",
                 onClick = vm::saveEditor,
                 modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp),
                 enabled = editor.isValid,

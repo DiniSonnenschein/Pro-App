@@ -72,6 +72,7 @@ private fun ScreenContent(vm: MainViewModel, screen: Screen) {
         is Screen.Draw -> DrawScreen(vm, screen.taskId)
         Screen.Editor -> EditorScreen(vm)
         Screen.Overview -> OverviewScreen(vm)
+        is Screen.PoolView -> PoolScreen(vm, screen.poolId)
         Screen.Fungarium -> FungariumScreen(vm)
         is Screen.Celebration -> CelebrationScreen(vm, screen.reward)
         Screen.Settings -> SettingsScreen(vm)

@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- Ordner mit Plus (neuer Pool) -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="1.8"
+        android:strokeLineJoin="round"
+        android:pathData="M3,6.5C3,5.7 3.7,5 4.5,5L9.3,5L11.3,7L19.5,7C20.3,7 21,7.7 21,8.5L21,17.5C21,18.3 20.3,19 19.5,19L4.5,19C3.7,19 3,18.3 3,17.5Z" />
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="1.8"
+        android:strokeLineCap="round"
+        android:pathData="M12,10L12,16M9,13L15,13" />
+</vector>

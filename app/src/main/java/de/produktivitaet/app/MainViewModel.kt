@@ -23,13 +23,15 @@ sealed interface Screen {
     data class Draw(val taskId: Long?) : Screen
     data object Editor : Screen
     data object Overview : Screen
+    /** Inhalt eines Pools (eigenes, dekorierbares Fenster). */
+    data class PoolView(val poolId: Long) : Screen
     data object Fungarium : Screen
     data class Celebration(val reward: Reward) : Screen
     data object Settings : Screen
     data object Statistics : Screen
 }
 
-enum class EditTarget { NEW, TASK, TEMPLATE }
+enum class EditTarget { NEW, NEW_TEMPLATE, TASK, TEMPLATE }
 
 /** Dekorierbares Fenster eines Bildschirms (null = nicht dekorierbar). */
 fun windowId(screen: Screen): String? = when (screen) {
@@ -37,6 +39,7 @@ fun windowId(screen: Screen): String? = when (screen) {
     Screen.Overview -> "overview"
     Screen.Editor -> "editor"
     is Screen.Draw -> if (screen.taskId != null) "draw" else "relax"
+    is Screen.PoolView -> poolWindow(screen.poolId)
     Screen.Fungarium, is Screen.Celebration, Screen.Settings, Screen.Statistics -> null
 }
 
@@ -60,6 +63,8 @@ class EditorState(
     val editingId: Long?,
     val completedSteps: Int,
     templateId: Long?,
+    /** Pool, in den eine neue Karte kommt (null = normale Liste). */
+    val poolId: Long? = null,
     title: String,
     steps: List<StepDraft>,
 ) {
@@ -96,11 +101,12 @@ class EditorState(
     }
 
     companion object {
-        fun forNew(template: Task?) = EditorState(
-            target = EditTarget.NEW,
+        fun forNew(template: Task?, poolId: Long? = null, asTemplate: Boolean = false) = EditorState(
+            target = if (asTemplate) EditTarget.NEW_TEMPLATE else EditTarget.NEW,
             editingId = null,
             completedSteps = 0,
             templateId = template?.id,
+            poolId = poolId,
             title = template?.title ?: "",
             steps = template?.steps?.map(::draftOf) ?: listOf(StepDraft()),
         )
@@ -197,8 +203,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         false
     }
 
-    fun newTask(template: Task? = null) {
-        editor = EditorState.forNew(template)
+    /** Formular "Neue Aufgabe"; mit [poolId] landet sie in diesem Pool. */
+    fun newTask(template: Task? = null, poolId: Long? = null) {
+        editor = EditorState.forNew(template, poolId)
+        open(Screen.Editor)
+    }
+
+    /** Formular "Neue Vorlage"; mit [poolId] landet sie in diesem Pool. */
+    fun newTemplate(poolId: Long? = null) {
+        editor = EditorState.forNew(null, poolId, asTemplate = true)
         open(Screen.Editor)
     }
 
@@ -219,9 +232,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         val steps = e.toSteps()
         when (e.target) {
             EditTarget.NEW -> {
-                store.addTask(title, steps, e.templateId)
+                store.addTask(title, steps, e.templateId, e.poolId)
                 if (e.saveAsTemplate) store.addTemplate(title, steps)
-                // Zurück dorthin, wo das Formular geöffnet wurde (Startseite oder Übersicht).
+                // Zurück dorthin, wo das Formular geöffnet wurde (Startseite, Übersicht oder Pool).
+                back()
+            }
+            EditTarget.NEW_TEMPLATE -> {
+                store.addTemplate(title, steps, e.poolId)
                 back()
             }
             EditTarget.TASK -> {

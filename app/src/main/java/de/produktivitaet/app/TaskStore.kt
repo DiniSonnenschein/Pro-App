@@ -52,13 +52,96 @@ class TaskStore(context: Context, private val catalog: MushroomCatalog) {
     fun findTemplate(id: Long): Task? = templates.firstOrNull { it.id == id }
     fun findMushroom(id: Long): Mushroom? = mushrooms.firstOrNull { it.id == id }
 
-    fun addTask(title: String, steps: List<Step>, templateId: Long? = null) {
-        tasks.add(Task(nextId(), title, steps, templateId = templateId))
+    /** Neue Aufgabe – landet ganz oben in ihrer Liste (bzw. ihrem Pool). */
+    fun addTask(title: String, steps: List<Step>, templateId: Long? = null, poolId: Long? = null) {
+        tasks.add(Task(nextId(), title, steps, templateId = templateId, poolId = poolId, sortKey = topKey(false, poolId)))
         save()
     }
 
-    fun addTemplate(title: String, steps: List<Step>) {
-        templates.add(Task(nextId(), title, steps))
+    /** Neue Vorlage – landet ganz oben in ihrer Liste (bzw. ihrem Pool). */
+    fun addTemplate(title: String, steps: List<Step>, poolId: Long? = null) {
+        templates.add(Task(nextId(), title, steps, poolId = poolId, sortKey = topKey(true, poolId)))
+        save()
+    }
+
+    // ---- Übersicht: Reihenfolge und Pools ----
+
+    val pools = mutableStateListOf<Pool>()
+
+    fun findPool(id: Long): Pool? = pools.firstOrNull { it.id == id }
+
+    private fun cards(forTemplates: Boolean) = if (forTemplates) templates else tasks
+
+    /** Karten und Pools einer Liste in Anzeige-Reihenfolge. Pools gibt es nur in der Hauptliste. */
+    fun entries(forTemplates: Boolean, poolId: Long?): List<ListEntry> {
+        val cards = cards(forTemplates).filter { it.poolId == poolId }.map { ListEntry.Card(it) }
+        val folders = if (poolId == null) pools.filter { it.forTemplates == forTemplates }.map { ListEntry.Folder(it) } else emptyList()
+        return (cards + folders).sortedBy { it.sortKey }
+    }
+
+    fun poolSize(pool: Pool): Int = cards(pool.forTemplates).count { it.poolId == pool.id }
+
+    /** Sortierschlüssel für "ganz oben" in einer Liste. */
+    private fun topKey(forTemplates: Boolean, poolId: Long?): Long =
+        (entries(forTemplates, poolId).minOfOrNull { it.sortKey } ?: 0L) - 1
+
+    fun addPool(name: String, forTemplates: Boolean) {
+        val id = (pools.maxOfOrNull { it.id } ?: 0L) + 1
+        pools.add(Pool(id, name, forTemplates, topKey(forTemplates, null)))
+        save()
+    }
+
+    fun renamePool(id: Long, name: String) {
+        val i = pools.indexOfFirst { it.id == id }
+        if (i < 0) return
+        pools[i] = pools[i].copy(name = name)
+        save()
+    }
+
+    /** Pool samt Inhalt löschen; alle zugehörigen Pilze gehen zurück ins Fungarium. */
+    fun deletePool(id: Long) {
+        val pool = findPool(id) ?: return
+        val contained = cards(pool.forTemplates).filter { it.poolId == id }.map { it.id }.toSet()
+        cards(pool.forTemplates).removeAll { it.id in contained }
+        val window = poolWindow(id)
+        placements.removeAll { p ->
+            when (val a = p.anchor) {
+                is Anchor.OnTask -> !pool.forTemplates && a.taskId in contained
+                is Anchor.OnTemplate -> pool.forTemplates && a.templateId in contained
+                is Anchor.OnPool -> a.poolId == id
+                is Anchor.Window -> a.window == window
+                is Anchor.Area -> a.window == window
+            }
+        }
+        pools.removeAll { it.id == id }
+        save()
+    }
+
+    /** Neue Reihenfolge einer Liste nach dem Verschieben. */
+    fun reorder(forTemplates: Boolean, ordered: List<ListEntry>) {
+        ordered.forEachIndexed { index, entry ->
+            val key = index.toLong()
+            when (entry) {
+                is ListEntry.Folder -> {
+                    val i = pools.indexOfFirst { it.id == entry.pool.id }
+                    if (i >= 0 && pools[i].sortKey != key) pools[i] = pools[i].copy(sortKey = key)
+                }
+                is ListEntry.Card -> {
+                    val list = cards(forTemplates)
+                    val i = list.indexOfFirst { it.id == entry.task.id }
+                    if (i >= 0 && list[i].sortKey != key) list[i] = list[i].copy(sortKey = key)
+                }
+            }
+        }
+        save()
+    }
+
+    /** Karte in einen Pool legen ([poolId] = null: zurück in die normale Liste) – jeweils ganz oben. */
+    fun moveToPool(forTemplates: Boolean, cardId: Long, poolId: Long?) {
+        val list = cards(forTemplates)
+        val i = list.indexOfFirst { it.id == cardId }
+        if (i < 0) return
+        list[i] = list[i].copy(poolId = poolId, sortKey = topKey(forTemplates, poolId))
         save()
     }
 
@@ -319,6 +402,17 @@ class TaskStore(context: Context, private val catalog: MushroomCatalog) {
         }
         val ids = mushrooms.mapTo(HashSet()) { it.id }
         if (placements.removeAll { it.mushroomId !in ids }) changed = true
+        // Karten in nicht (mehr) vorhandenen Pools zurück in die normale Liste.
+        val poolIds = pools.mapTo(HashSet()) { it.id }
+        for (list in listOf(tasks, templates)) {
+            for (i in list.indices) {
+                val pid = list[i].poolId
+                if (pid != null && pid !in poolIds) {
+                    list[i] = list[i].copy(poolId = null)
+                    changed = true
+                }
+            }
+        }
         // Das Fenster "Hinzufügen" gibt es nicht mehr: dort platzierte Sprites zurück ins Fungarium.
         val removedWindow = "add"
         if (placements.removeAll { p ->
@@ -355,6 +449,7 @@ class TaskStore(context: Context, private val catalog: MushroomCatalog) {
         val rewardedWeek: Long?,
         val placements: List<Placement>,
         val bigFirst: Boolean,
+        val pools: List<Pool>,
     )
 
     private fun replaceWith(data: Data) {
@@ -375,10 +470,15 @@ class TaskStore(context: Context, private val catalog: MushroomCatalog) {
         rewardedDay = data.rewardedDay
         rewardedWeek = data.rewardedWeek
         bigFirst = data.bigFirst
+        pools.clear()
+        pools.addAll(data.pools)
     }
 
     private fun toJson(): JSONObject = JSONObject()
-        .put("version", 4)
+        .put("version", 5)
+        .put("pools", JSONArray().apply {
+            pools.forEach { put(JSONObject().put("id", it.id).put("name", it.name).put("forTemplates", it.forTemplates).put("sortKey", it.sortKey)) }
+        })
         .put("tasks", JSONArray().apply { tasks.forEach { put(it.toJson()) } })
         .put("templates", JSONArray().apply { templates.forEach { put(it.toJson()) } })
         .put("completions", JSONArray().apply { completions.forEach { put(JSONArray().put(it.epochDay).put(it.minutes)) } })
@@ -403,6 +503,9 @@ class TaskStore(context: Context, private val catalog: MushroomCatalog) {
             next = next?.let { MushroomRoll(it.getString("species"), it.getInt("size").coerceIn(1, 5)) },
             placements = root.optJSONArray("placements").mapObjects { it.toPlacement() }.filterNotNull(),
             bigFirst = root.optBoolean("bigFirst", true),
+            pools = root.optJSONArray("pools").mapObjects {
+                Pool(it.getLong("id"), it.getString("name"), it.optBoolean("forTemplates"), it.optLong("sortKey", 0))
+            },
             nextBeing = if (root.isNull("nextBeing")) null else root.optString("nextBeing"),
             completions = root.optJSONArray("completions").let { arr ->
                 if (arr == null) emptyList() else (0 until arr.length()).map {
@@ -437,6 +540,8 @@ private fun Task.toJson(): JSONObject = JSONObject()
     .put("steps", JSONArray().apply { steps.forEach { put(it.toJson()) } })
     .put("templateId", templateId)
     .put("hiddenCopies", JSONArray().apply { hiddenCopies.forEach { put(it) } })
+    .put("poolId", poolId)
+    .put("sortKey", sortKey)
 
 private fun Step.toJson(): JSONObject = JSONObject()
     .put("title", title)
@@ -455,6 +560,7 @@ private fun Placement.toJson(): JSONObject {
         is Anchor.Area -> JSONObject().put("type", "area").put("window", anchor.window).put("key", anchor.key)
         is Anchor.OnTask -> JSONObject().put("type", "task").put("id", anchor.taskId)
         is Anchor.OnTemplate -> JSONObject().put("type", "template").put("id", anchor.templateId)
+        is Anchor.OnPool -> JSONObject().put("type", "pool").put("id", anchor.poolId)
     }
     return JSONObject()
         .put("mushroomId", mushroomId)
@@ -472,6 +578,7 @@ private fun JSONObject.toPlacement(): Placement? {
         "area" -> Anchor.Area(a.getString("window"), a.getString("key"))
         "task" -> Anchor.OnTask(a.getLong("id"))
         "template" -> Anchor.OnTemplate(a.getLong("id"))
+        "pool" -> Anchor.OnPool(a.getLong("id"))
         else -> return null
     }
     return Placement(
@@ -484,7 +591,10 @@ private fun JSONObject.toPlacement(): Placement? {
     )
 }
 
-private fun JSONArray?.toTasks(): List<Task> = mapObjects { it.toTask() }.filter { it.steps.isNotEmpty() }
+/** Ältere Daten ohne Sortierschlüssel behalten ihre bisherige Reihenfolge. */
+private fun JSONArray?.toTasks(): List<Task> = mapObjects { it.toTask() }
+    .mapIndexed { i, t -> if (t.sortKey == Long.MIN_VALUE) t.copy(sortKey = i.toLong()) else t }
+    .filter { it.steps.isNotEmpty() }
 
 private fun JSONObject.toTask(): Task {
     val hidden = optJSONArray("hiddenCopies")
@@ -495,6 +605,8 @@ private fun JSONObject.toTask(): Task {
         completedSteps = optInt("completedSteps", 0),
         templateId = if (has("templateId") && !isNull("templateId")) getLong("templateId") else null,
         hiddenCopies = if (hidden == null) emptySet() else (0 until hidden.length()).mapTo(HashSet()) { hidden.getLong(it) },
+        poolId = if (has("poolId") && !isNull("poolId")) getLong("poolId") else null,
+        sortKey = if (has("sortKey")) getLong("sortKey") else Long.MIN_VALUE,
     )
 }
 

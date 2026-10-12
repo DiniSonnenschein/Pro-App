@@ -283,6 +283,7 @@ private fun visibleDecor(vm: MainViewModel, win: DecorWindowState, density: Floa
             is Anchor.Area -> if (a.window == win.window) win.areaRect(a.key)?.topLeft ?: continue else continue
             is Anchor.OnTask -> win.areaRect(taskKey(a.taskId))?.topLeft ?: continue
             is Anchor.OnTemplate -> win.areaRect(templateKey(a.templateId))?.topLeft ?: continue
+            is Anchor.OnPool -> win.areaRect(poolKey(a.poolId))?.topLeft ?: continue
         }
         add(DecorItemId.Placed(m.id), m, p, origin + Offset(p.x * density, p.y * density), p.mirrored, p.anchor !is Anchor.Window, p.scale)
     }

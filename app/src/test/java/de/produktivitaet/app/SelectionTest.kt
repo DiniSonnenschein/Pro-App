@@ -64,3 +64,25 @@ class SelectionTest {
         assertTrue(everywhere.toggleEverywhere().isEmpty)
     }
 }
+
+class SearchTest {
+    private val task = Task(
+        1, "Wohnung putzen",
+        listOf(Step("Bad wischen", Places(everywhere = true), 15), Step("Fenster", Places(everywhere = true), 30)),
+    )
+
+    @Test
+    fun findsWordsInTitleAndSteps() {
+        assertTrue(task.matches("putzen"))
+        assertTrue(task.matches("BAD"))
+        assertTrue(task.matches("wohnung fenster"))
+        assertFalse(task.matches("garten"))
+    }
+
+    @Test
+    fun numbersMatchStepDurations() {
+        assertTrue(task.matches("15"))
+        assertTrue(task.matches("30"))
+        assertFalse(task.matches("20"))
+    }
+}

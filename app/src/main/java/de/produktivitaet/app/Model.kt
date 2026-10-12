@@ -65,7 +65,25 @@ data class Task(
     val templateId: Long? = null,
     /** Pilz-Kopien der Vorlage, die auf dieser Aufgabe gelöscht wurden. */
     val hiddenCopies: Set<Long> = emptySet(),
+    /** Pool (Ordner), in dem die Karte liegt; null = normale Liste. */
+    val poolId: Long? = null,
+    /** Position in ihrer Liste: kleiner = weiter oben. */
+    val sortKey: Long = 0,
 ) {
+    /**
+     * Suche: Jedes Wort muss im Titel oder in einer Schritt-Beschreibung vorkommen;
+     * eine Zahl passt auch, wenn ein Schritt genau so viele Minuten dauert.
+     */
+    fun matches(query: String): Boolean {
+        val words = query.trim().lowercase().split(Regex("\\s+")).filter { it.isNotEmpty() }
+        return words.all { w ->
+            val minutes = w.toIntOrNull()
+            (minutes != null && steps.any { it.minutes == minutes }) ||
+                title.lowercase().contains(w) ||
+                steps.any { it.title.lowercase().contains(w) }
+        }
+    }
+
     val currentStep: Step get() = steps.first()
     val totalSteps: Int get() = completedSteps + steps.size
 
@@ -165,15 +183,47 @@ sealed interface Anchor {
 
     /** Auf einer Vorlagenkarte – wird auf alle Aufgaben aus dieser Vorlage kopiert. */
     data class OnTemplate(val templateId: Long) : Anchor
+
+    /** Auf einer Pool-Karte – gehört nur zur Pool-Karte, nicht zu den Aufgaben darin. */
+    data class OnPool(val poolId: Long) : Anchor
 }
+
+/** Ordner für Aufgaben oder Vorlagen (getrennt je Reiter). Unterordner gibt es nicht. */
+data class Pool(
+    val id: Long,
+    val name: String,
+    val forTemplates: Boolean,
+    val sortKey: Long = 0,
+)
+
+/** Ein Eintrag in der Übersicht: eine Karte (Aufgabe/Vorlage) oder ein Pool. */
+sealed interface ListEntry {
+    val key: String
+    val sortKey: Long
+
+    data class Card(val task: Task) : ListEntry {
+        override val key get() = "t${task.id}"
+        override val sortKey get() = task.sortKey
+    }
+
+    data class Folder(val pool: Pool) : ListEntry {
+        override val key get() = "p${pool.id}"
+        override val sortKey get() = pool.sortKey
+    }
+}
+
+/** Fenster eines Pools (dekorierbar wie jedes andere Fenster). */
+fun poolWindow(poolId: Long) = "pool-$poolId"
 
 /** Area-Schlüssel für Karten; alle anderen Schlüssel sind Buttons/Felder eines Fensters. */
 fun taskKey(id: Long) = "task:$id"
 fun templateKey(id: Long) = "template:$id"
+fun poolKey(id: Long) = "pool:$id"
 
 fun anchorForArea(window: String, key: String): Anchor = when {
     key.startsWith("task:") -> Anchor.OnTask(key.removePrefix("task:").toLong())
     key.startsWith("template:") -> Anchor.OnTemplate(key.removePrefix("template:").toLong())
+    key.startsWith("pool:") -> Anchor.OnPool(key.removePrefix("pool:").toLong())
     else -> Anchor.Area(window, key)
 }
 
