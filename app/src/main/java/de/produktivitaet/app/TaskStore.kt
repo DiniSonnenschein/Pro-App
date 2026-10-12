@@ -366,10 +366,14 @@ class TaskStore(context: Context, private val catalog: MushroomCatalog) {
     /** Pinsel: einfärben; dieselbe Farbe nochmal macht es rückgängig, eine andere färbt um. */
     fun toggleTint(anchor: Anchor, color: Int) {
         val i = tints.indexOfFirst { it.anchor == anchor }
-        when {
-            i >= 0 && tints[i].color == color -> tints.removeAt(i)
-            i >= 0 -> tints[i] = Tint(anchor, color)
-            else -> tints.add(Tint(anchor, color))
+        if (i >= 0 && tints[i].color == color) {
+            // Nochmal dieselbe Farbe: zurück zur Farbe vom letzten Speichern (bzw. ganz ohne Farbe).
+            val saved = draftTints.firstOrNull { it.anchor == anchor }
+            if (saved != null) tints[i] = saved else tints.removeAt(i)
+        } else if (i >= 0) {
+            tints[i] = Tint(anchor, color)
+        } else {
+            tints.add(Tint(anchor, color))
         }
         save()
     }

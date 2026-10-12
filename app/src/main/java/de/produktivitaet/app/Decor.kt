@@ -368,7 +368,7 @@ private fun DecorOverlay(vm: MainViewModel, win: DecorWindowState) {
                         val brushButton = win.areaRect("pinsel")
                         when {
                             doneButton != null && doneButton.contains(start) -> vm.confirmDecor()
-                            brushButton != null && brushButton.contains(start) -> vm.brush = null
+                            brushButton != null && brushButton.contains(start) -> vm.openPalette()
                             hit != null -> vm.selected = hit.id
                             mushroomButton != null && mushroomButton.contains(start) -> vm.open(Screen.Fungarium)
                             vm.brush != null -> {

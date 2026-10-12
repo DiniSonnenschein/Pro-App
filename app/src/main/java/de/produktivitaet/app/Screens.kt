@@ -168,7 +168,7 @@ fun AppMenu(vm: MainViewModel) {
                 text = { Text("Daten sichern", color = White) },
                 onClick = {
                     menuOpen = false
-                    exportLauncher.launch("toadstool-sicherung-${LocalDate.now()}.json")
+                    exportLauncher.launch("like-a-champignon-sicherung-${LocalDate.now()}.json")
                 },
             )
             DropdownMenuItem(
@@ -280,7 +280,7 @@ fun DrawScreen(vm: MainViewModel, taskId: Long?) {
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             ColorButton("Erledigt", LightBlue, Black, "erledigt") { vm.completeStep(task.id, fromOverview = false) }
-            ColorButton("Wiederholen", DarkGreen, White, "wiederholen") { vm.backToHome() }
+            ColorButton("Nicht jetzt", DarkGreen, White, "wiederholen") { vm.backToHome() }
             ColorButton("Verwerfen", DarkRed, White, "verwerfen") { vm.discardTask(task.id) }
         }
         Spacer(Modifier.height(8.dp))

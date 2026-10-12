@@ -87,15 +87,17 @@ data class Task(
     val currentStep: Step get() = steps.first()
     val totalSteps: Int get() = completedSteps + steps.size
 
-    fun fits(place: Place, availableMinutes: Int): Boolean =
-        currentStep.minutes <= availableMinutes && place in currentStep.places
+    /** Passt der aktuelle Schritt? null = keine Einschränkung bei Ort bzw. Zeit. */
+    fun fits(place: Place?, availableMinutes: Int?): Boolean =
+        (availableMinutes == null || currentStep.minutes <= availableMinutes) &&
+            (place == null || place in currentStep.places)
 
     /** Die Aufgabe nach "Erledigt": nächster Schritt, oder null, wenn keiner mehr übrig ist. */
     fun advanced(): Task? =
         if (steps.size > 1) copy(steps = steps.drop(1), completedSteps = completedSteps + 1) else null
 }
 
-fun eligibleTasks(tasks: List<Task>, place: Place, availableMinutes: Int): List<Task> =
+fun eligibleTasks(tasks: List<Task>, place: Place?, availableMinutes: Int?): List<Task> =
     tasks.filter { it.fits(place, availableMinutes) }
 
 /**

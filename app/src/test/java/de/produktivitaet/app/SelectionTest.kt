@@ -86,3 +86,16 @@ class SearchTest {
         assertFalse(task.matches("20"))
     }
 }
+
+class OpenDrawTest {
+    @Test
+    fun withoutPlaceOrTimeEverythingFits() {
+        val tasks = listOf(
+            Task(1, "Lang", listOf(Step("", Places(setOf(Place.CITY)), 240))),
+            Task(2, "Kurz", listOf(Step("", Places(setOf(Place.HOME)), 5))),
+        )
+        assertEquals(2, eligibleTasks(tasks, null, null).size)
+        assertEquals(listOf(2L), eligibleTasks(tasks, Place.HOME, null).map { it.id })
+        assertEquals(listOf(2L), eligibleTasks(tasks, null, 30).map { it.id })
+    }
+}

@@ -1,11 +1,11 @@
-# Toadstool
+# Like a Champignon
 
 Android-App, in der du Aufgaben notierst und dir per Knopfdruck eine zufällige Aufgabe
 ausspielen lässt, die zu deinem Ort und deiner verfügbaren Zeit passt.
 
 ## Installieren
 
-1. Auf GitHub unter **Releases → „Produktivität – neueste Version“** die Datei
+1. Auf GitHub unter **Releases → „Like a Champignon – neueste Version“** die Datei
    `Produktivitaet.apk` auf dem Handy herunterladen.
 2. Die Datei öffnen. Beim ersten Mal fragt Android, ob der Browser/„Eigene Dateien“
    Apps installieren darf – das erlauben.

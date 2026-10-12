@@ -249,14 +249,14 @@ fun MushroomControls(vm: MainViewModel, size: Dp) {
         Spacer(Modifier.width(14.dp))
         val brush = vm.brush
         if (brush != null) {
-            // Aktive Pinselfarbe; Antippen legt den Pinsel weg.
+            // Aktive Pinselfarbe; Antippen öffnet die Farbauswahl.
             Box(
                 Modifier
                     .size(size * 0.7f)
                     .decoArea("pinsel", CircleShape, Palette.color(brush))
                     .clip(CircleShape)
                     .border(2.dp, White, CircleShape)
-                    .clickable { vm.brush = null },
+                    .clickable { vm.openPalette() },
             )
         } else {
             // Gleicht den kleinen Pilz-Button aus, damit der Haken mittig sitzt.
@@ -527,6 +527,15 @@ fun TaskCard(
             .padding(start = 16.dp, end = 4.dp, top = 12.dp, bottom = 14.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
+            if (!isTemplate && task.templateId != null) {
+                // Kennzeichen: Diese Aufgabe basiert auf einer Vorlage.
+                Icon(
+                    painterResource(R.drawable.ic_vorlage),
+                    "Aus einer Vorlage",
+                    tint = muted,
+                    modifier = Modifier.padding(end = 6.dp).size(16.dp),
+                )
+            }
             Text(
                 task.title,
                 fontSize = 18.sp,

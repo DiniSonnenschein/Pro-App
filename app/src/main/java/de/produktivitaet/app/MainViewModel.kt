@@ -159,18 +159,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun drawTask() {
-        val place = homePlace
-        val minutes = homeMinutes.toIntOrNull()
-        if (place == null || minutes == null) {
-            homeHint = when {
-                place == null && minutes == null -> "Bitte gib an, wo du bist und wie viel Zeit du hast."
-                place == null -> "Bitte gib an, wo du bist."
-                else -> "Bitte gib an, wie viel Zeit du hast."
-            }
-            return
-        }
+        // Ohne Ort bzw. Zeit gibt es keine Einschränkung.
         homeHint = null
-        open(Screen.Draw(eligibleTasks(store.tasks, place, minutes).randomOrNull()?.id))
+        open(Screen.Draw(eligibleTasks(store.tasks, homePlace, homeMinutes.toIntOrNull()).randomOrNull()?.id))
     }
 
     /**
@@ -310,6 +301,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Aktive Pinselfarbe im Pilz-Modus (Palettenindex) oder null. */
     var brush by mutableStateOf<Int?>(null)
+
+    /** Reiter im Fungarium: 0 Pilze, 1 Pilz-Wesen, 2 Farben. */
+    var fungariumTab by mutableIntStateOf(0)
+
+    /** Farbkreis im Pilz-Modus: direkt zur Farbauswahl. */
+    fun openPalette() {
+        fungariumTab = 2
+        open(Screen.Fungarium)
+    }
 
     /** Farbe im Fungarium angetippt: zurück ins Fenster, Pilz-Modus mit dieser Farbe als Pinsel. */
     fun pickColor(index: Int) {

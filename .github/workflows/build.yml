@@ -41,5 +41,5 @@ jobs:
           gh release delete neueste-version --cleanup-tag --yes || true
           gh release create neueste-version Produktivitaet.apk \
             --target "$GITHUB_SHA" \
-            --title "Produktivität – neueste Version" \
+            --title "Like a Champignon – neueste Version" \
             --notes "Automatisch gebaut aus ${GITHUB_REF_NAME} (${GITHUB_SHA::7}). Produktivitaet.apk auf dem Handy herunterladen und öffnen, um die App zu installieren oder zu aktualisieren."

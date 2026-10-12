@@ -76,7 +76,9 @@ import kotlin.random.Random
 fun FungariumScreen(vm: MainViewModel) {
     val store = vm.store
     val earned = store.mushrooms.groupingBy { it.species }.eachCount()
-    var tab by rememberSaveable { mutableIntStateOf(0) }
+    // Der Farben-Reiter erscheint erst, wenn die erste Farbe erspielt wurde.
+    val paletteVisible = store.unlockedColors.any { it !in Palette.STARTERS }
+    val tab = if (!paletteVisible && vm.fungariumTab == 2) 0 else vm.fungariumTab
     val showBeings = tab == 1
     val list = if (showBeings) vm.catalog.beings else vm.catalog.mushrooms
     val found = list.count { (earned[it.id] ?: 0) > 0 }
@@ -103,21 +105,21 @@ fun FungariumScreen(vm: MainViewModel) {
         TabRow(selectedTabIndex = tab, containerColor = Black, contentColor = White) {
             Tab(
                 selected = tab == 0,
-                onClick = { tab = 0 },
+                onClick = { vm.fungariumTab = 0 },
                 text = { Text("Pilze", fontSize = 16.sp) },
                 selectedContentColor = White,
                 unselectedContentColor = Muted,
             )
             Tab(
                 selected = tab == 1,
-                onClick = { tab = 1 },
+                onClick = { vm.fungariumTab = 1 },
                 text = { Text("Pilz-Wesen", fontSize = 16.sp) },
                 selectedContentColor = White,
                 unselectedContentColor = Muted,
             )
-            Tab(
+            if (paletteVisible) Tab(
                 selected = tab == 2,
-                onClick = { tab = 2 },
+                onClick = { vm.fungariumTab = 2 },
                 text = { Text("Farben", fontSize = 16.sp) },
                 selectedContentColor = White,
                 unselectedContentColor = Muted,
@@ -574,7 +576,7 @@ private fun PaletteTab(vm: MainViewModel) {
                 if (vm.decorMode) {
                     Text("Tippe eine Farbe an und dann einen Button, eine Karte oder den Hintergrund.", fontSize = 14.sp)
                 }
-                Text("${unlocked.size} von ${Palette.size} Farben gefunden", color = Muted, fontSize = 15.sp)
+                Text("${unlocked.size} Farben gesammelt", color = Muted, fontSize = 15.sp)
             }
         }
         items(unlocked, key = { it }) { index ->
