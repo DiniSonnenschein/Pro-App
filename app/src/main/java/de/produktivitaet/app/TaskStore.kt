@@ -37,12 +37,24 @@ class TaskStore(context: Context, private val catalog: MushroomCatalog) {
     var bigFirst by mutableStateOf(true)
         private set
 
+    /** Pools (Ordner) der Übersicht. */
+    val pools = mutableStateListOf<Pool>()
+
+    /** Stand der Platzierungen (und gelöschten Kopien) beim Start des Pilz-Modus; null = kein Entwurf. */
+    private var draft: Pair<List<Placement>, Map<Long, Set<Long>>>? = null
+
+    // Achtung: Alle Eigenschaften müssen VOR diesem init-Block stehen, sonst sind sie beim Laden noch null.
     init {
         if (file.baseFile.exists()) {
             try {
                 replaceWith(parse(JSONObject(String(file.readFully(), Charsets.UTF_8))))
             } catch (e: Exception) {
-                // Beschädigte Datei: mit leeren Listen weitermachen statt abzustürzen.
+                // Nicht lesbar: Datei vorher beiseitelegen, damit beim nächsten Speichern nichts verloren geht,
+                // dann mit leeren Listen weitermachen statt abzustürzen.
+                try {
+                    file.baseFile.copyTo(File(file.baseFile.parentFile, "daten-nicht-lesbar-${System.currentTimeMillis()}.json"))
+                } catch (ignored: Exception) {
+                }
             }
         }
         if (repairMushrooms()) save()
@@ -65,8 +77,6 @@ class TaskStore(context: Context, private val catalog: MushroomCatalog) {
     }
 
     // ---- Übersicht: Reihenfolge und Pools ----
-
-    val pools = mutableStateListOf<Pool>()
 
     fun findPool(id: Long): Pool? = pools.firstOrNull { it.id == id }
 
@@ -314,9 +324,6 @@ class TaskStore(context: Context, private val catalog: MushroomCatalog) {
     }
 
     // ---- Entwurf im Pilz-Modus ----
-
-    /** Stand der Platzierungen (und gelöschten Kopien) beim Start des Pilz-Modus; null = kein Entwurf. */
-    private var draft: Pair<List<Placement>, Map<Long, Set<Long>>>? = null
 
     /** Ab jetzt ist alles Entwurf: wird angezeigt, aber erst mit [commitDraft] gespeichert. */
     fun beginDraft() {
