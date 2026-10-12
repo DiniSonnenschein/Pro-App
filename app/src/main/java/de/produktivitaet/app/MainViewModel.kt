@@ -2,6 +2,7 @@ package de.produktivitaet.app
 
 import android.app.Application
 import android.net.Uri
+import java.time.LocalDate
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -48,6 +49,8 @@ fun windowId(screen: Screen): String? = when (screen) {
 sealed interface DecorItemId {
     data class Placed(val mushroomId: Long) : DecorItemId
     data class Copy(val taskId: Long, val mushroomId: Long) : DecorItemId
+    /** Kopie der Dekoration eines Vorlagen-Pools auf seinem Spiegel-Pool bei den Aufgaben. */
+    data class PoolCopy(val poolId: Long, val mushroomId: Long) : DecorItemId
 }
 
 class StepDraft(title: String = "", places: Places = Places(), minutes: String = "") {
@@ -77,6 +80,38 @@ class EditorState(
     var templateId by mutableStateOf(templateId)
         private set
 
+    // ---- Nur Vorlagen: "Automatisch hinzufügen" ----
+    var autoEnabled by mutableStateOf(false)
+    var autoStart by mutableStateOf(LocalDate.now().toEpochDay())
+    /** 0 = einmalig, 1 = alle _ Tage, 2 = an jedem _. des Monats */
+    var repeatKind by mutableIntStateOf(0)
+    var repeatValue by mutableStateOf("")
+
+    private fun repeatOrNull(): Repeat? = when (repeatKind) {
+        0 -> Repeat.Once
+        1 -> repeatValue.toIntOrNull()?.takeIf { it > 0 }?.let { Repeat.EveryDays(it) }
+        else -> repeatValue.toIntOrNull()?.takeIf { it in 1..31 }?.let { Repeat.MonthDay(it) }
+    }
+
+    fun toAuto(): AutoAdd? = if (!autoEnabled) null else repeatOrNull()?.let { AutoAdd(autoStart, it) }
+
+    fun loadAuto(auto: AutoAdd?) {
+        autoEnabled = auto != null
+        if (auto == null) return
+        autoStart = auto.nextDue
+        when (val r = auto.repeat) {
+            Repeat.Once -> repeatKind = 0
+            is Repeat.EveryDays -> {
+                repeatKind = 1
+                repeatValue = r.days.toString()
+            }
+            is Repeat.MonthDay -> {
+                repeatKind = 2
+                repeatValue = r.day.toString()
+            }
+        }
+    }
+
     /** "Vorlage verwenden": überschreibt alle Eingaben mit der Vorlage. */
     fun applyTemplate(template: Task) {
         title = template.title
@@ -92,6 +127,7 @@ class EditorState(
             if (title.isBlank()) add("Titel")
             if (steps.any { !it.hasPlaces }) add("Ort")
             if (steps.any { !it.hasMinutes }) add("Dauer")
+            if (autoEnabled && repeatOrNull() == null) add(if (repeatKind == 1) "Anzahl Tage" else "Tag im Monat (1–31)")
         }
         return if (missing.isEmpty()) null else "Es fehlt noch: " + missing.joinToString(", ")
     }
@@ -119,7 +155,7 @@ class EditorState(
             templateId = null,
             title = task.title,
             steps = task.steps.map(::draftOf),
-        )
+        ).also { it.loadAuto(task.auto) }
 
         private fun draftOf(step: Step) = StepDraft(step.title, step.places, step.minutes.toString())
     }
@@ -200,7 +236,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Formular "Neue Aufgabe"; mit [poolId] landet sie in diesem Pool. */
     fun newTask(template: Task? = null, poolId: Long? = null) {
-        editor = EditorState.forNew(template, poolId)
+        // Aufgaben aus einer Vorlage landen im (Spiegel-)Pool der Vorlage.
+        editor = EditorState.forNew(template, template?.let { store.taskPoolFor(it) } ?: poolId)
         open(Screen.Editor)
     }
 
@@ -233,7 +270,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 back()
             }
             EditTarget.NEW_TEMPLATE -> {
-                store.addTemplate(title, steps, e.poolId)
+                store.addTemplate(title, steps, e.poolId, e.toAuto())
+                store.runAutoAdd()
                 back()
             }
             EditTarget.TASK -> {
@@ -241,7 +279,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 back()
             }
             EditTarget.TEMPLATE -> {
-                store.updateTemplate(e.editingId!!, title, steps)
+                store.updateTemplate(e.editingId!!, title, steps, e.toAuto())
+                store.runAutoAdd()
                 back()
             }
         }
@@ -390,6 +429,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         when (id) {
             is DecorItemId.Placed -> store.unplace(id.mushroomId)
             is DecorItemId.Copy -> store.hideCopy(id.taskId, id.mushroomId)
+            is DecorItemId.PoolCopy -> store.hidePoolCopy(id.poolId, id.mushroomId)
         }
         selected = null
     }

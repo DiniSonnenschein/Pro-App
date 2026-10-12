@@ -169,6 +169,18 @@ private fun areaDecor(vm: MainViewModel, window: String, key: String): List<Trip
             }
         }
     }
+    if (anchor is Anchor.OnPool) {
+        // Spiegel-Pool: Dekoration des Vorlagen-Pools als Kopie.
+        val pool = store.findPool(anchor.poolId)
+        val source = pool?.sourcePoolId
+        if (pool != null && source != null) {
+            for (p in store.placements) {
+                if (p.anchor != Anchor.OnPool(source) || p.mushroomId in pool.hiddenCopies) continue
+                val m = store.findMushroom(p.mushroomId) ?: continue
+                result += Triple(DecorItemId.PoolCopy(pool.id, m.id), m, p)
+            }
+        }
+    }
     for (p in store.placements) {
         if (p.anchor != anchor) continue
         val m = store.findMushroom(p.mushroomId) ?: continue
@@ -304,6 +316,18 @@ private fun visibleDecor(vm: MainViewModel, win: DecorWindowState, density: Floa
             if (p.anchor != Anchor.OnTemplate(templateId) || p.mushroomId in task.hiddenCopies) continue
             val m = vm.store.findMushroom(p.mushroomId) ?: continue
             add(DecorItemId.Copy(task.id, m.id), m, null, origin + Offset(p.x * density, p.y * density), p.mirrored, true, p.scale)
+        }
+    }
+    // Kopien der Vorlagen-Pool-Dekoration auf Spiegel-Pools.
+    for (key in win.areas.keys) {
+        if (!key.startsWith("pool:")) continue
+        val pool = vm.store.findPool(key.removePrefix("pool:").toLong()) ?: continue
+        val source = pool.sourcePoolId ?: continue
+        val origin = win.areaRect(key)?.topLeft ?: continue
+        for (p in vm.store.placements) {
+            if (p.anchor != Anchor.OnPool(source) || p.mushroomId in pool.hiddenCopies) continue
+            val m = vm.store.findMushroom(p.mushroomId) ?: continue
+            add(DecorItemId.PoolCopy(pool.id, m.id), m, null, origin + Offset(p.x * density, p.y * density), p.mirrored, true, p.scale)
         }
     }
     return behind + onTop

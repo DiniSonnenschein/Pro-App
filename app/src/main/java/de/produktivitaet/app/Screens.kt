@@ -37,6 +37,11 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.rememberDatePickerState
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.DatePickerDialog
+import androidx.compose.material3.DatePicker
 import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -379,6 +384,10 @@ fun EditorScreen(vm: MainViewModel) {
                 decoKey = "schritt-hinzufuegen",
             )
 
+            if (editor.target == EditTarget.NEW_TEMPLATE || editor.target == EditTarget.TEMPLATE) {
+                AutoAddSection(editor)
+            }
+
             if (editor.target == EditTarget.NEW) {
                 Row(
                     modifier = Modifier
@@ -508,6 +517,96 @@ private fun TemplatePickerDialog(templates: List<Task>, onPick: (Task) -> Unit, 
                     Text(info, fontSize = 13.sp, color = Muted)
                 }
             }
+        }
+    }
+}
+
+/** Nur bei Vorlagen: an einem Datum automatisch eine Aufgabe daraus anlegen, optional wiederholt. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun AutoAddSection(editor: EditorState) {
+    var pickDate by remember { mutableStateOf(false) }
+    Column(
+        Modifier.fillMaxWidth().border(1.dp, Muted, CardShape).padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(CardShape)
+                .clickable { editor.autoEnabled = !editor.autoEnabled },
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Checkbox(
+                checked = editor.autoEnabled,
+                onCheckedChange = null,
+                colors = CheckboxDefaults.colors(checkedColor = White, uncheckedColor = Muted, checkmarkColor = Black),
+            )
+            Spacer(Modifier.width(8.dp))
+            Text("Automatisch hinzufügen", fontSize = 16.sp)
+        }
+        if (editor.autoEnabled) {
+            SelectField(
+                LocalDate.ofEpochDay(editor.autoStart).format(java.time.format.DateTimeFormatter.ofPattern("dd.MM.yyyy")),
+                "Datum",
+                { pickDate = true },
+                Modifier.fillMaxWidth(),
+                decoKey = "auto-datum",
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Pill("Einmalig", selected = editor.repeatKind == 0) { editor.repeatKind = 0 }
+                Pill("Alle _ Tage", selected = editor.repeatKind == 1) {
+                    if (editor.repeatKind != 1) editor.repeatValue = ""
+                    editor.repeatKind = 1
+                }
+                Pill("Monatlich", selected = editor.repeatKind == 2) {
+                    if (editor.repeatKind != 2) editor.repeatValue = ""
+                    editor.repeatKind = 2
+                }
+            }
+            when (editor.repeatKind) {
+                1 -> TextInput(
+                    editor.repeatValue,
+                    { editor.repeatValue = it },
+                    "Alle wie viele Tage?",
+                    Modifier.fillMaxWidth(),
+                    numeric = true,
+                    suffix = "Tage",
+                    decoKey = "auto-tage",
+                )
+                2 -> TextInput(
+                    editor.repeatValue,
+                    { editor.repeatValue = it },
+                    "An jedem … Tag des Monats",
+                    Modifier.fillMaxWidth(),
+                    numeric = true,
+                    suffix = ". Tag",
+                    decoKey = "auto-monatstag",
+                )
+            }
+            Text(
+                "Die Aufgabe wird beim Öffnen der App angelegt, sobald der Tag erreicht ist. " +
+                    "Ist aus dieser Vorlage noch eine unveränderte Aufgabe offen, setzt der Termin einmal aus.",
+                color = Muted,
+                fontSize = 13.sp,
+            )
+        }
+    }
+    if (pickDate) {
+        val state = rememberDatePickerState(initialSelectedDateMillis = editor.autoStart * 86_400_000L)
+        DatePickerDialog(
+            onDismissRequest = { pickDate = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    state.selectedDateMillis?.let { editor.autoStart = Math.floorDiv(it, 86_400_000L) }
+                    pickDate = false
+                }) { Text("OK", color = White) }
+            },
+            dismissButton = {
+                TextButton(onClick = { pickDate = false }) { Text("Abbrechen", color = White) }
+            },
+        ) {
+            DatePicker(state = state)
         }
     }
 }

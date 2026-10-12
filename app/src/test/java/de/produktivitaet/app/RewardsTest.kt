@@ -101,3 +101,27 @@ class PaletteTest {
         assertEquals(1.0, colorChance(5000, 0), 1e-9)
     }
 }
+
+class AutoAddTest {
+    private fun day(y: Int, m: Int, d: Int) = LocalDate.of(y, m, d).toEpochDay()
+
+    @Test
+    fun onceHasNoNextDate() {
+        assertEquals(null, AutoAdd(day(2026, 10, 1), Repeat.Once).advancedAfter(day(2026, 10, 1)))
+    }
+
+    @Test
+    fun everyDaysSkipsMissedDates() {
+        val auto = AutoAdd(day(2026, 10, 1), Repeat.EveryDays(3))
+        assertEquals(day(2026, 10, 4), auto.advancedAfter(day(2026, 10, 1))!!.nextDue)
+        // Zehn Tage nicht geöffnet: nur der nächste Termin nach heute, keine Nachholflut.
+        assertEquals(day(2026, 10, 13), auto.advancedAfter(day(2026, 10, 11))!!.nextDue)
+    }
+
+    @Test
+    fun monthDayUsesLastDayInShortMonths() {
+        val auto = AutoAdd(day(2026, 1, 31), Repeat.MonthDay(31))
+        assertEquals(day(2026, 2, 28), auto.advancedAfter(day(2026, 1, 31))!!.nextDue)
+        assertEquals(day(2026, 3, 31), AutoAdd(day(2026, 2, 28), Repeat.MonthDay(31)).advancedAfter(day(2026, 2, 28))!!.nextDue)
+    }
+}

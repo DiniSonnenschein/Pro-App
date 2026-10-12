@@ -91,6 +91,10 @@ fun CardList(vm: MainViewModel, forTemplates: Boolean, poolId: Long?, modifier: 
         else -> entries
     }
 
+    /** Aufgabe aus einer Vorlage: bleibt im Pool ihrer Vorlage (nur Umsortieren erlaubt). */
+    fun isPinnedKey(key: String): Boolean =
+        !forTemplates && key.startsWith("t") && store.findTask(key.drop(1).toLong())?.let { store.isPinned(it) } == true
+
     fun onDragMove() {
         val key = draggingKey ?: return
         val layout = listState.layoutInfo
@@ -115,7 +119,7 @@ fun CardList(vm: MainViewModel, forTemplates: Boolean, poolId: Long?, modifier: 
         }
         val targetKey = target.key as String
         // Karte über der Mitte eines Pools: hineinlegen statt tauschen.
-        if (key.startsWith("t") && targetKey.startsWith("p")) {
+        if (key.startsWith("t") && targetKey.startsWith("p") && !isPinnedKey(key)) {
             val rel = (c - target.offset) / target.size
             if (rel in 0.22f..0.78f) {
                 hoverPool = targetKey.drop(1).toLong()
@@ -137,7 +141,7 @@ fun CardList(vm: MainViewModel, forTemplates: Boolean, poolId: Long?, modifier: 
         if (key != null) {
             val id = key.drop(1).toLong()
             when {
-                !moved && poolId != null && key.startsWith("t") ->
+                !moved && poolId != null && key.startsWith("t") && !isPinnedKey(key) ->
                     toRemoveFromPool = (if (forTemplates) store.templates else store.tasks).firstOrNull { it.id == id }
                 pool != null -> store.moveToPool(forTemplates, id, pool)
                 moved -> store.reorder(forTemplates, working.toList())
@@ -229,6 +233,7 @@ fun CardList(vm: MainViewModel, forTemplates: Boolean, poolId: Long?, modifier: 
                             },
                             onEdit = { poolToRename = entry.pool },
                             onDelete = { poolToDelete = entry.pool },
+                            mirrored = entry.pool.sourcePoolId != null,
                         )
                         is ListEntry.Card -> Column {
                             val task = entry.task
@@ -320,6 +325,7 @@ fun CardList(vm: MainViewModel, forTemplates: Boolean, poolId: Long?, modifier: 
         ConfirmDialog(
             title = "Pool löschen?",
             text = "Der Pool „${pool.name}“ wird mit allen $count enthaltenen $what endgültig gelöscht. " +
+                (if (forTemplates) "Auch sein Pool bei den Aufgaben verschwindet: Aufgaben aus diesen Vorlagen werden gelöscht, eigene Aufgaben kommen zurück in die Liste. " else "") +
                 "Zugehörige Pilze kommen zurück ins Fungarium.",
             confirmText = "Löschen",
             onConfirm = {
@@ -442,6 +448,7 @@ private fun PoolCard(
     onOpen: () -> Unit,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
+    mirrored: Boolean,
 ) {
     val fg = onColor(areaColor(poolKey(pool.id), Black))
     Row(
@@ -455,6 +462,15 @@ private fun PoolCard(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(painterResource(R.drawable.ic_ordner), "Pool", tint = fg, modifier = Modifier.size(26.dp))
+        if (mirrored) {
+            // Kennzeichen: Pool stammt aus den Vorlagen.
+            Icon(
+                painterResource(R.drawable.ic_vorlage),
+                "Aus den Vorlagen",
+                tint = fg.copy(alpha = 0.65f),
+                modifier = Modifier.padding(start = 6.dp).size(16.dp),
+            )
+        }
         Spacer(Modifier.width(12.dp))
         Text(pool.name, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, color = fg, modifier = Modifier.weight(1f))
         Box(
@@ -465,8 +481,13 @@ private fun PoolCard(
         ) {
             Text("$count", fontSize = 14.sp, color = fg.copy(alpha = 0.65f))
         }
-        IconButton(onClick = onEdit) { Icon(Icons.Filled.Edit, "Umbenennen", tint = fg) }
-        IconButton(onClick = onDelete) { Icon(Icons.Filled.Delete, "Löschen", tint = fg) }
+        if (mirrored) {
+            // Umbenennen und Löschen nur im Vorlagen-Reiter.
+            Spacer(Modifier.width(96.dp))
+        } else {
+            IconButton(onClick = onEdit) { Icon(Icons.Filled.Edit, "Umbenennen", tint = fg) }
+            IconButton(onClick = onDelete) { Icon(Icons.Filled.Delete, "Löschen", tint = fg) }
+        }
     }
 }
 

@@ -15,6 +15,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.key
 import androidx.compose.ui.Modifier
+import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
 
 class MainActivity : ComponentActivity() {
@@ -29,6 +30,12 @@ class MainActivity : ComponentActivity() {
                 App()
             }
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // Fällige "Automatisch hinzufügen"-Vorlagen beim Zurückkehren in die App anlegen.
+        ViewModelProvider(this)[MainViewModel::class.java].store.runAutoAdd()
     }
 }
 

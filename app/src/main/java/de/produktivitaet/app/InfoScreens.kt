@@ -116,7 +116,7 @@ private fun GoalEditor(
 
 /** Kleiner Umschalter: weiß gefüllt, wenn ausgewählt. */
 @Composable
-private fun Pill(text: String, selected: Boolean, enabled: Boolean = true, onClick: () -> Unit) {
+fun Pill(text: String, selected: Boolean, enabled: Boolean = true, onClick: () -> Unit) {
     Box(
         Modifier
             .clip(CircleShape)

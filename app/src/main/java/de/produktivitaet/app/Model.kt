@@ -2,6 +2,8 @@ package de.produktivitaet.app
 
 import java.time.DayOfWeek
 import java.time.LocalDate
+import java.time.YearMonth
+import java.time.format.DateTimeFormatter
 import kotlin.random.Random
 
 /** Reihenfolge = alphabetische Anzeige-Reihenfolge. Gespeichert wird der Name, daher ist Umsortieren gefahrlos. */
@@ -69,6 +71,8 @@ data class Task(
     val poolId: Long? = null,
     /** Position in ihrer Liste: kleiner = weiter oben. */
     val sortKey: Long = 0,
+    /** Nur Vorlagen: automatisch als Aufgabe hinzufügen (Termin und Wiederholung). */
+    val auto: AutoAdd? = null,
 ) {
     /**
      * Suche: Jedes Wort muss im Titel oder in einer Schritt-Beschreibung vorkommen;
@@ -198,7 +202,53 @@ data class Pool(
     val name: String,
     val forTemplates: Boolean,
     val sortKey: Long = 0,
+    /** Aufgaben-Pool, der einen Vorlagen-Pool spiegelt: Id des Vorlagen-Pools. */
+    val sourcePoolId: Long? = null,
+    /** Pilz-Kopien der Vorlagen-Pool-Karte, die auf diesem Spiegel-Pool gelöscht wurden. */
+    val hiddenCopies: Set<Long> = emptySet(),
 )
+
+/** Wiederholung für "Automatisch hinzufügen". */
+sealed interface Repeat {
+    data object Once : Repeat
+    data class EveryDays(val days: Int) : Repeat
+    data class MonthDay(val day: Int) : Repeat
+}
+
+/** Nächster Termin (Epoch-Tag), an dem aus der Vorlage eine Aufgabe entsteht, und die Wiederholung. */
+data class AutoAdd(val nextDue: Long, val repeat: Repeat) {
+    /** Termin nach [today]; null, wenn es keinen weiteren gibt. Verpasste Termine werden übersprungen. */
+    fun advancedAfter(today: Long): AutoAdd? = when (val r = repeat) {
+        Repeat.Once -> null
+        is Repeat.EveryDays -> {
+            var d = nextDue
+            val step = r.days.coerceAtLeast(1)
+            while (d <= today) d += step
+            copy(nextDue = d)
+        }
+        is Repeat.MonthDay -> {
+            var month = YearMonth.from(LocalDate.ofEpochDay(nextDue))
+            var date = dayInMonth(month, r.day)
+            while (date.toEpochDay() <= today) {
+                month = month.plusMonths(1)
+                date = dayInMonth(month, r.day)
+            }
+            copy(nextDue = date.toEpochDay())
+        }
+    }
+
+    fun describe(): String {
+        val date = LocalDate.ofEpochDay(nextDue).format(DateTimeFormatter.ofPattern("dd.MM.yyyy"))
+        return when (val r = repeat) {
+            Repeat.Once -> "Automatisch am $date"
+            is Repeat.EveryDays -> if (r.days == 1) "Automatisch täglich, nächstes Mal $date" else "Automatisch alle ${r.days} Tage, nächstes Mal $date"
+            is Repeat.MonthDay -> "Automatisch am ${r.day}. jedes Monats, nächstes Mal $date"
+        }
+    }
+}
+
+/** Der [day]. Tag im Monat – in kürzeren Monaten der letzte Tag. */
+fun dayInMonth(month: YearMonth, day: Int): LocalDate = month.atDay(day.coerceIn(1, month.lengthOfMonth()))
 
 /** Ein Eintrag in der Übersicht: eine Karte (Aufgabe/Vorlage) oder ein Pool. */
 sealed interface ListEntry {

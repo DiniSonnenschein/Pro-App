@@ -50,6 +50,7 @@ class TaskStore(context: Context, private val catalog: MushroomCatalog) {
     /** Stand der Platzierungen (und gelöschten Kopien) beim Start des Pilz-Modus; null = kein Entwurf. */
     private var draft: Pair<List<Placement>, Map<Long, Set<Long>>>? = null
     private var draftTints: List<Tint> = emptyList()
+    private var draftPools: List<Pool> = emptyList()
 
     // Achtung: Alle Eigenschaften müssen VOR diesem init-Block stehen, sonst sind sie beim Laden noch null.
     init {
@@ -65,7 +66,12 @@ class TaskStore(context: Context, private val catalog: MushroomCatalog) {
                 }
             }
         }
-        if (repairMushrooms()) save()
+        val repaired = repairMushrooms()
+        syncTemplatePools()
+        syncTemplateTasks()
+        if (repaired) save()
+        runAutoAdd()
+        save()
     }
 
     fun findTask(id: Long): Task? = tasks.firstOrNull { it.id == id }
@@ -75,12 +81,13 @@ class TaskStore(context: Context, private val catalog: MushroomCatalog) {
     /** Neue Aufgabe – landet ganz oben in ihrer Liste (bzw. ihrem Pool). */
     fun addTask(title: String, steps: List<Step>, templateId: Long? = null, poolId: Long? = null) {
         tasks.add(Task(nextId(), title, steps, templateId = templateId, poolId = poolId, sortKey = topKey(false, poolId)))
+        syncTemplateTasks()
         save()
     }
 
     /** Neue Vorlage – landet ganz oben in ihrer Liste (bzw. ihrem Pool). */
-    fun addTemplate(title: String, steps: List<Step>, poolId: Long? = null) {
-        templates.add(Task(nextId(), title, steps, poolId = poolId, sortKey = topKey(true, poolId)))
+    fun addTemplate(title: String, steps: List<Step>, poolId: Long? = null, auto: AutoAdd? = null) {
+        templates.add(Task(nextId(), title, steps, poolId = poolId, sortKey = topKey(true, poolId), auto = auto))
         save()
     }
 
@@ -103,9 +110,19 @@ class TaskStore(context: Context, private val catalog: MushroomCatalog) {
     private fun topKey(forTemplates: Boolean, poolId: Long?): Long =
         (entries(forTemplates, poolId).minOfOrNull { it.sortKey } ?: 0L) - 1
 
+    /** Aufgaben-Pool, der den Vorlagen-Pool [templatePoolId] spiegelt. */
+    fun mirrorOf(templatePoolId: Long): Pool? = pools.firstOrNull { it.sourcePoolId == templatePoolId }
+
+    /** Aufgabe aus einer noch vorhandenen Vorlage: bleibt im Pool ihrer Vorlage und lässt sich nicht umsortieren. */
+    fun isPinned(task: Task): Boolean = task.templateId?.let { findTemplate(it) } != null
+
+    /** Pool, in den Aufgaben aus [template] gehören (Spiegel ihres Vorlagen-Pools) oder null. */
+    fun taskPoolFor(template: Task): Long? = template.poolId?.let { mirrorOf(it)?.id }
+
     fun addPool(name: String, forTemplates: Boolean) {
         val id = (pools.maxOfOrNull { it.id } ?: 0L) + 1
         pools.add(Pool(id, name, forTemplates, topKey(forTemplates, null)))
+        syncTemplatePools()
         save()
     }
 
@@ -113,6 +130,7 @@ class TaskStore(context: Context, private val catalog: MushroomCatalog) {
         val i = pools.indexOfFirst { it.id == id }
         if (i < 0) return
         pools[i] = pools[i].copy(name = name)
+        syncTemplatePools()
         save()
     }
 
@@ -121,25 +139,76 @@ class TaskStore(context: Context, private val catalog: MushroomCatalog) {
         val pool = findPool(id) ?: return
         val contained = cards(pool.forTemplates).filter { it.poolId == id }.map { it.id }.toSet()
         cards(pool.forTemplates).removeAll { it.id in contained }
-        val window = poolWindow(id)
-        fun belongsToPool(a: Anchor) = when (a) {
-            is Anchor.OnTask -> !pool.forTemplates && a.taskId in contained
-            is Anchor.OnTemplate -> pool.forTemplates && a.templateId in contained
-            is Anchor.OnPool -> a.poolId == id
+        removeDecorOf(pool, contained)
+        pools.removeAll { it.id == id }
+        if (pool.forTemplates) {
+            // Spiegel-Pool: Aufgaben aus den gelöschten Vorlagen gehen mit, eigene Aufgaben zurück in die Liste.
+            mirrorOf(id)?.let { mirror ->
+                val inMirror = tasks.filter { it.poolId == mirror.id }
+                val fromTemplates = inMirror.filter { it.templateId in contained }.map { it.id }.toSet()
+                tasks.removeAll { it.id in fromTemplates }
+                removeDecorOf(mirror, fromTemplates)
+                pools.removeAll { it.id == mirror.id }
+                for (t in inMirror.filter { it.id !in fromTemplates }) {
+                    val i = tasks.indexOfFirst { it.id == t.id }
+                    if (i >= 0) tasks[i] = tasks[i].copy(poolId = null, sortKey = topKey(false, null))
+                }
+            }
+        }
+        syncTemplateTasks()
+        save()
+    }
+
+    /** Pilze und Farben eines Pools (Karte, Fenster) und seiner gelöschten Karten [cardIds] entfernen. */
+    private fun removeDecorOf(pool: Pool, cardIds: Set<Long>) {
+        val window = poolWindow(pool.id)
+        fun belongs(a: Anchor) = when (a) {
+            is Anchor.OnTask -> !pool.forTemplates && a.taskId in cardIds
+            is Anchor.OnTemplate -> pool.forTemplates && a.templateId in cardIds
+            is Anchor.OnPool -> a.poolId == pool.id
             is Anchor.Window -> a.window == window
             is Anchor.Area -> a.window == window
         }
-        tints.removeAll { belongsToPool(it.anchor) }
-        placements.removeAll { p ->
-            when (val a = p.anchor) {
-                is Anchor.OnTask -> !pool.forTemplates && a.taskId in contained
-                is Anchor.OnTemplate -> pool.forTemplates && a.templateId in contained
-                is Anchor.OnPool -> a.poolId == id
-                is Anchor.Window -> a.window == window
-                is Anchor.Area -> a.window == window
+        tints.removeAll { belongs(it.anchor) }
+        placements.removeAll { belongs(it.anchor) }
+    }
+
+    /** Jeder Vorlagen-Pool hat einen gleichnamigen Spiegel-Pool bei den Aufgaben; verwaiste Spiegel verschwinden. */
+    private fun syncTemplatePools() {
+        for (source in pools.filter { it.forTemplates }) {
+            val i = pools.indexOfFirst { it.sourcePoolId == source.id }
+            if (i < 0) {
+                val id = (pools.maxOfOrNull { it.id } ?: 0L) + 1
+                pools.add(Pool(id, source.name, forTemplates = false, sortKey = topKey(false, null), sourcePoolId = source.id))
+            } else if (pools[i].name != source.name) {
+                pools[i] = pools[i].copy(name = source.name)
             }
         }
-        pools.removeAll { it.id == id }
+        val sources = pools.filter { it.forTemplates }.mapTo(HashSet()) { it.id }
+        for (orphan in pools.filter { it.sourcePoolId != null && it.sourcePoolId !in sources }) {
+            for (i in tasks.indices) {
+                if (tasks[i].poolId == orphan.id) tasks[i] = tasks[i].copy(poolId = null)
+            }
+            removeDecorOf(orphan, emptySet())
+            pools.removeAll { it.id == orphan.id }
+        }
+    }
+
+    /** Aufgaben aus Vorlagen liegen immer im (Spiegel-)Pool ihrer Vorlage bzw. in der normalen Liste. */
+    private fun syncTemplateTasks() {
+        for (i in tasks.indices) {
+            val t = tasks[i]
+            val template = t.templateId?.let { findTemplate(it) } ?: continue
+            val target = taskPoolFor(template)
+            if (t.poolId != target) tasks[i] = t.copy(poolId = target, sortKey = topKey(false, target))
+        }
+    }
+
+    /** Kopie der Vorlagen-Pool-Dekoration nur auf diesem Spiegel-Pool entfernen. */
+    fun hidePoolCopy(poolId: Long, mushroomId: Long) {
+        val i = pools.indexOfFirst { it.id == poolId }
+        if (i < 0) return
+        pools[i] = pools[i].copy(hiddenCopies = pools[i].hiddenCopies + mushroomId)
         save()
     }
 
@@ -168,7 +237,37 @@ class TaskStore(context: Context, private val catalog: MushroomCatalog) {
         val i = list.indexOfFirst { it.id == cardId }
         if (i < 0) return
         list[i] = list[i].copy(poolId = poolId, sortKey = topKey(forTemplates, poolId))
+        // Wandert eine Vorlage, folgen ihr alle daraus entstandenen Aufgaben.
+        if (forTemplates) syncTemplateTasks()
         save()
+    }
+
+    // ---- Automatisch hinzufügen ----
+
+    /**
+     * Fällige Vorlagen als Aufgabe hinzufügen (beim Start und beim Zurückkehren in die App).
+     * Verpasste Termine ergeben höchstens eine Aufgabe. Ist aus der Vorlage noch eine unveränderte,
+     * unbegonnene Aufgabe offen, setzt der Termin einmal aus.
+     */
+    fun runAutoAdd(today: Long = LocalDate.now().toEpochDay()) {
+        var changed = false
+        for (i in templates.indices) {
+            val template = templates[i]
+            val auto = template.auto ?: continue
+            if (auto.nextDue > today) continue
+            val alreadyOpen = tasks.any {
+                it.templateId == template.id && it.completedSteps == 0 && it.title == template.title && it.steps == template.steps
+            }
+            if (!alreadyOpen) {
+                val target = taskPoolFor(template)
+                tasks.add(
+                    Task(nextId(), template.title, template.steps, templateId = template.id, poolId = target, sortKey = topKey(false, target)),
+                )
+            }
+            templates[i] = template.copy(auto = auto.advancedAfter(today))
+            changed = true
+        }
+        if (changed) save()
     }
 
     fun updateTask(id: Long, title: String, steps: List<Step>) {
@@ -178,10 +277,10 @@ class TaskStore(context: Context, private val catalog: MushroomCatalog) {
         save()
     }
 
-    fun updateTemplate(id: Long, title: String, steps: List<Step>) {
+    fun updateTemplate(id: Long, title: String, steps: List<Step>, auto: AutoAdd?) {
         val i = templates.indexOfFirst { it.id == id }
         if (i < 0) return
-        templates[i] = templates[i].copy(title = title, steps = steps)
+        templates[i] = templates[i].copy(title = title, steps = steps, auto = auto)
         save()
     }
 
@@ -360,6 +459,10 @@ class TaskStore(context: Context, private val catalog: MushroomCatalog) {
             val templateId = findTask(anchor.taskId)?.templateId ?: return null
             return tints.firstOrNull { it.anchor == Anchor.OnTemplate(templateId) }?.color
         }
+        if (anchor is Anchor.OnPool) {
+            val source = findPool(anchor.poolId)?.sourcePoolId ?: return null
+            return tints.firstOrNull { it.anchor == Anchor.OnPool(source) }?.color
+        }
         return null
     }
 
@@ -389,6 +492,7 @@ class TaskStore(context: Context, private val catalog: MushroomCatalog) {
     fun beginDraft() {
         draft = placements.toList() to tasks.associate { it.id to it.hiddenCopies }
         draftTints = tints.toList()
+        draftPools = pools.toList()
     }
 
     /** Haken: Entwurf übernehmen. */
@@ -404,6 +508,8 @@ class TaskStore(context: Context, private val catalog: MushroomCatalog) {
         placements.addAll(oldPlacements)
         tints.clear()
         tints.addAll(draftTints)
+        pools.clear()
+        pools.addAll(draftPools)
         for (i in tasks.indices) {
             val hidden = oldHidden[tasks[i].id] ?: continue
             if (tasks[i].hiddenCopies != hidden) tasks[i] = tasks[i].copy(hiddenCopies = hidden)
@@ -555,7 +661,13 @@ class TaskStore(context: Context, private val catalog: MushroomCatalog) {
         .put("colors", JSONArray().apply { unlockedColors.forEach { put(it) } })
         .put("tints", JSONArray().apply { tints.forEach { put(JSONObject().put("anchor", it.anchor.toJson()).put("color", it.color)) } })
         .put("pools", JSONArray().apply {
-            pools.forEach { put(JSONObject().put("id", it.id).put("name", it.name).put("forTemplates", it.forTemplates).put("sortKey", it.sortKey)) }
+            pools.forEach {
+                put(
+                    JSONObject().put("id", it.id).put("name", it.name).put("forTemplates", it.forTemplates)
+                        .put("sortKey", it.sortKey).put("sourcePoolId", it.sourcePoolId)
+                        .put("hiddenCopies", JSONArray().apply { it.hiddenCopies.forEach { m -> put(m) } }),
+                )
+            }
         })
         .put("tasks", JSONArray().apply { tasks.forEach { put(it.toJson()) } })
         .put("templates", JSONArray().apply { templates.forEach { put(it.toJson()) } })
@@ -589,7 +701,15 @@ class TaskStore(context: Context, private val catalog: MushroomCatalog) {
                 o.getJSONObject("anchor").toAnchor()?.let { Tint(it, o.getInt("color")) }
             }.filterNotNull().filter { it.color in 0 until Palette.size },
             pools = root.optJSONArray("pools").mapObjects {
-                Pool(it.getLong("id"), it.getString("name"), it.optBoolean("forTemplates"), it.optLong("sortKey", 0))
+                val hidden = it.optJSONArray("hiddenCopies")
+                Pool(
+                    it.getLong("id"),
+                    it.getString("name"),
+                    it.optBoolean("forTemplates"),
+                    it.optLong("sortKey", 0),
+                    sourcePoolId = if (it.has("sourcePoolId") && !it.isNull("sourcePoolId")) it.getLong("sourcePoolId") else null,
+                    hiddenCopies = if (hidden == null) emptySet() else (0 until hidden.length()).mapTo(HashSet()) { k -> hidden.getLong(k) },
+                )
             },
             nextBeing = if (root.isNull("nextBeing")) null else root.optString("nextBeing"),
             completions = root.optJSONArray("completions").let { arr ->
@@ -627,6 +747,17 @@ private fun Task.toJson(): JSONObject = JSONObject()
     .put("hiddenCopies", JSONArray().apply { hiddenCopies.forEach { put(it) } })
     .put("poolId", poolId)
     .put("sortKey", sortKey)
+    .put("auto", auto?.let { a ->
+        val r = a.repeat
+        JSONObject().put("nextDue", a.nextDue).put(
+            "repeat",
+            when (r) {
+                Repeat.Once -> "once"
+                is Repeat.EveryDays -> "days:${r.days}"
+                is Repeat.MonthDay -> "month:${r.day}"
+            },
+        )
+    })
 
 private fun Step.toJson(): JSONObject = JSONObject()
     .put("title", title)
@@ -694,6 +825,15 @@ private fun JSONObject.toTask(): Task {
         hiddenCopies = if (hidden == null) emptySet() else (0 until hidden.length()).mapTo(HashSet()) { hidden.getLong(it) },
         poolId = if (has("poolId") && !isNull("poolId")) getLong("poolId") else null,
         sortKey = if (has("sortKey")) getLong("sortKey") else Long.MIN_VALUE,
+        auto = optJSONObject("auto")?.let { a ->
+            val r = a.optString("repeat", "once")
+            val repeat = when {
+                r.startsWith("days:") -> Repeat.EveryDays(r.removePrefix("days:").toIntOrNull()?.coerceAtLeast(1) ?: 1)
+                r.startsWith("month:") -> Repeat.MonthDay(r.removePrefix("month:").toIntOrNull()?.coerceIn(1, 31) ?: 1)
+                else -> Repeat.Once
+            }
+            AutoAdd(a.getLong("nextDue"), repeat)
+        },
     )
 }
 

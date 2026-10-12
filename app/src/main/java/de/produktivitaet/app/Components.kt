@@ -554,6 +554,9 @@ fun TaskCard(
                 }
             }
         }
+        task.auto?.let {
+            Text(it.describe(), color = muted, fontSize = 12.sp, modifier = Modifier.padding(bottom = 4.dp, end = 12.dp))
+        }
         if (task.totalSteps == 1) {
             Text(stepInfo(task.currentStep), color = muted, fontSize = 14.sp)
         } else {
