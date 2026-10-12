@@ -103,7 +103,7 @@ fun HomeScreen(vm: MainViewModel) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 CircleIconButton(Icons.AutoMirrored.Filled.List, "Übersicht", { vm.open(Screen.Overview) }, decoKey = "uebersicht")
                 MushroomControls(vm, 64.dp)
-                CircleIconButton(Icons.Filled.Add, "Aufgabe hinzufügen", { vm.open(Screen.Add) }, decoKey = "plus")
+                CircleIconButton(Icons.Filled.Add, "Aufgabe hinzufügen", { vm.newTask() }, decoKey = "plus")
             }
         }
         Box(Modifier.align(Alignment.TopEnd).padding(8.dp)) {
@@ -256,7 +256,12 @@ fun DrawScreen(vm: MainViewModel, taskId: Long?) {
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             // Dieselbe Karte wie in der Übersicht – mit allen Pilzen, die auf der Aufgabe sitzen.
-            TaskCard(task, dimPending = true, isTemplate = false, actionSlots = 3)
+            TaskCard(task, dimPending = true, isTemplate = false, actionSlots = 3) {
+                IconButton(onClick = { vm.editTask(task) }) {
+                    Icon(Icons.Filled.Edit, "Bearbeiten", tint = White)
+                }
+                Spacer(Modifier.width(48.dp))
+            }
             Spacer(Modifier.height(28.dp))
             if (task.totalSteps > 1) {
                 Text("Schritt ${task.completedSteps + 1} von ${task.totalSteps}", color = Muted, fontSize = 16.sp)
@@ -278,53 +283,6 @@ fun DrawScreen(vm: MainViewModel, taskId: Long?) {
             ColorButton("Verwerfen", DarkRed, White, "verwerfen") { vm.discardTask(task.id) }
         }
         Spacer(Modifier.height(8.dp))
-        MushroomBar(vm)
-    }
-}
-
-@Composable
-fun AddScreen(vm: MainViewModel) {
-    val listState = rememberLazyListState()
-    RegisterDecorScroll(listState)
-    Column(Modifier.fillMaxSize()) {
-        TopBar("Hinzufügen", vm::back)
-        LazyColumn(
-            state = listState,
-            modifier = Modifier.weight(1f),
-            contentPadding = PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            item {
-                OutlineButton(
-                    text = "Neue Aufgabe erstellen",
-                    onClick = { vm.newTask() },
-                    modifier = Modifier.fillMaxWidth().heightIn(min = 64.dp),
-                    icon = Icons.Filled.Add,
-                    decoKey = "neu",
-                )
-            }
-            item {
-                Text(
-                    "Vorlagen",
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.padding(top = 16.dp),
-                )
-            }
-            if (vm.store.templates.isEmpty()) {
-                item {
-                    Text(
-                        "Noch keine Vorlagen. Setze beim Erstellen einer Aufgabe das Häkchen bei " +
-                            "„Als Vorlage speichern“, dann erscheint sie hier.",
-                        color = Muted,
-                        fontSize = 15.sp,
-                    )
-                }
-            }
-            items(vm.store.templates, key = { it.id }) { template ->
-                TaskCard(template, dimPending = false, isTemplate = true, actionSlots = 2, onClick = { vm.newTask(template) })
-            }
-        }
         MushroomBar(vm)
     }
 }
@@ -367,18 +325,33 @@ fun OverviewScreen(vm: MainViewModel) {
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            if (!showTemplates) {
+                item {
+                    OutlineButton(
+                        text = "Aufgabe hinzufügen",
+                        onClick = { vm.newTask() },
+                        modifier = Modifier.fillMaxWidth(),
+                        icon = Icons.Filled.Add,
+                        decoKey = "aufgabe-neu",
+                    )
+                }
+            }
             if (list.isEmpty()) {
                 item {
                     Text(
-                        if (showTemplates) "Noch keine Vorlagen gespeichert." else "Noch keine Aufgaben. Füge über das Plus auf der Startseite welche hinzu.",
+                        if (showTemplates) "Noch keine Vorlagen gespeichert. Setze beim Erstellen einer Aufgabe das Häkchen bei „Als Vorlage speichern“." else "Noch keine Aufgaben.",
                         color = Muted,
                         fontSize = 15.sp,
                     )
                 }
             }
             items(list, key = { it.id }) { item ->
-                TaskCard(item, dimPending = !showTemplates, isTemplate = showTemplates, actionSlots = if (showTemplates) 2 else 3) {
-                    if (!showTemplates) {
+                TaskCard(item, dimPending = !showTemplates, isTemplate = showTemplates, actionSlots = 3) {
+                    if (showTemplates) {
+                        IconButton(onClick = { vm.newTask(item) }) {
+                            Icon(Icons.Filled.Add, "Aufgabe aus dieser Vorlage erstellen", tint = LightBlue)
+                        }
+                    } else {
                         IconButton(onClick = { toComplete = item }) {
                             Icon(Icons.Filled.Check, "Erledigt", tint = LightBlue)
                         }
@@ -441,6 +414,7 @@ fun EditorScreen(vm: MainViewModel) {
     }
     val scroll = rememberScrollState()
     RegisterDecorScroll(scroll)
+    var pickTemplate by remember { mutableStateOf(false) }
 
     Column(Modifier.fillMaxSize()) {
         TopBar(screenTitle, vm::back)
@@ -451,6 +425,15 @@ fun EditorScreen(vm: MainViewModel) {
                 .padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
+            if (editor.target == EditTarget.NEW && vm.store.templates.isNotEmpty()) {
+                OutlineButton(
+                    text = "Vorlage verwenden",
+                    onClick = { pickTemplate = true },
+                    modifier = Modifier.fillMaxWidth(),
+                    icon = Icons.AutoMirrored.Filled.List,
+                    decoKey = "vorlage-verwenden",
+                )
+            }
             TextInput(editor.title, { editor.title = it }, "Titel", Modifier.fillMaxWidth(), decoKey = "titel")
 
             if (editor.steps.size == 1) {
@@ -513,6 +496,17 @@ fun EditorScreen(vm: MainViewModel) {
         MushroomBar(vm)
     }
 
+    if (pickTemplate) {
+        TemplatePickerDialog(
+            templates = vm.store.templates,
+            onPick = {
+                editor.applyTemplate(it)
+                pickTemplate = false
+            },
+            onDismiss = { pickTemplate = false },
+        )
+    }
+
     placesFor?.let { step ->
         MultiPlaceDialog(
             selected = step.places,
@@ -565,5 +559,36 @@ private fun StepFields(step: StepDraft, index: Int, showTitle: Boolean, onPickPl
             modifier = Modifier.fillMaxWidth(),
             decoKey = "schritt$index-dauer",
         )
+    }
+}
+
+/** Auswahl einer Vorlage im Formular; die gewählte Vorlage überschreibt alle Eingaben. */
+@Composable
+private fun TemplatePickerDialog(templates: List<Task>, onPick: (Task) -> Unit, onDismiss: () -> Unit) {
+    AppDialog("Vorlage wählen", onDismiss) {
+        Column(
+            Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            templates.forEach { template ->
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .clip(CardShape)
+                        .border(1.dp, Muted, CardShape)
+                        .clickable { onPick(template) }
+                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                ) {
+                    Text(template.title, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = White)
+                    val step = template.currentStep
+                    val info = if (template.steps.size > 1) {
+                        "${template.steps.size} Schritte"
+                    } else {
+                        "${step.places.label} · ${step.minutes} Min."
+                    }
+                    Text(info, fontSize = 13.sp, color = Muted)
+                }
+            }
+        }
     }
 }

@@ -319,6 +319,15 @@ class TaskStore(context: Context, private val catalog: MushroomCatalog) {
         }
         val ids = mushrooms.mapTo(HashSet()) { it.id }
         if (placements.removeAll { it.mushroomId !in ids }) changed = true
+        // Das Fenster "Hinzufügen" gibt es nicht mehr: dort platzierte Sprites zurück ins Fungarium.
+        val removedWindow = "add"
+        if (placements.removeAll { p ->
+                val a = p.anchor
+                (a is Anchor.Window && a.window == removedWindow) || (a is Anchor.Area && a.window == removedWindow)
+            }
+        ) {
+            changed = true
+        }
         return changed
     }
 

@@ -70,7 +70,6 @@ private fun ScreenContent(vm: MainViewModel, screen: Screen) {
     when (screen) {
         Screen.Home -> HomeScreen(vm)
         is Screen.Draw -> DrawScreen(vm, screen.taskId)
-        Screen.Add -> AddScreen(vm)
         Screen.Editor -> EditorScreen(vm)
         Screen.Overview -> OverviewScreen(vm)
         Screen.Fungarium -> FungariumScreen(vm)

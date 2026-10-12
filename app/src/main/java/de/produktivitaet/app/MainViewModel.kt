@@ -21,7 +21,6 @@ sealed interface Screen {
     data object Home : Screen
     /** [taskId] ist null, wenn keine Aufgabe gepasst hat. */
     data class Draw(val taskId: Long?) : Screen
-    data object Add : Screen
     data object Editor : Screen
     data object Overview : Screen
     data object Fungarium : Screen
@@ -36,7 +35,6 @@ enum class EditTarget { NEW, TASK, TEMPLATE }
 fun windowId(screen: Screen): String? = when (screen) {
     Screen.Home -> "home"
     Screen.Overview -> "overview"
-    Screen.Add -> "add"
     Screen.Editor -> "editor"
     is Screen.Draw -> if (screen.taskId != null) "draw" else "relax"
     Screen.Fungarium, is Screen.Celebration, Screen.Settings, Screen.Statistics -> null
@@ -61,13 +59,25 @@ class EditorState(
     val target: EditTarget,
     val editingId: Long?,
     val completedSteps: Int,
-    val templateId: Long?,
+    templateId: Long?,
     title: String,
     steps: List<StepDraft>,
 ) {
     var title by mutableStateOf(title)
     val steps = mutableStateListOf<StepDraft>().apply { addAll(steps) }
     var saveAsTemplate by mutableStateOf(false)
+
+    /** Vorlage, auf der die neue Aufgabe basiert (deren Pilze erscheinen dann als Kopien darauf). */
+    var templateId by mutableStateOf(templateId)
+        private set
+
+    /** "Vorlage verwenden": überschreibt alle Eingaben mit der Vorlage. */
+    fun applyTemplate(template: Task) {
+        title = template.title
+        steps.clear()
+        steps.addAll(template.steps.map { draftOf(it) })
+        templateId = template.id
+    }
 
     val isValid: Boolean get() = missingHint() == null
 
@@ -211,7 +221,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             EditTarget.NEW -> {
                 store.addTask(title, steps, e.templateId)
                 if (e.saveAsTemplate) store.addTemplate(title, steps)
-                backToHome()
+                // Zurück dorthin, wo das Formular geöffnet wurde (Startseite oder Übersicht).
+                back()
             }
             EditTarget.TASK -> {
                 store.updateTask(e.editingId!!, title, steps)
