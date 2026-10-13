@@ -73,6 +73,9 @@ import androidx.compose.ui.unit.toSize
 import kotlin.math.roundToInt
 
 val LocalAppViewModel = staticCompositionLocalOf<MainViewModel?> { null }
+
+/** true innerhalb einer schwebenden Kopie einer Karte: [decoArea] zeichnet, meldet aber keine Fläche an. */
+val LocalDecoGhost = staticCompositionLocalOf { false }
 val LocalDecorWindow = staticCompositionLocalOf<DecorWindowState?> { null }
 
 class AreaInfo(val rectInRoot: Rect, val shape: Shape)
@@ -214,14 +217,24 @@ fun Modifier.decoArea(key: String?, shape: Shape, background: Color): Modifier =
     val vm = LocalAppViewModel.current
     if (key == null || win == null || vm == null) return@composed Modifier.background(background, shape)
     val screenHeightDp = LocalConfiguration.current.screenHeightDp.toFloat()
-    DisposableEffect(win, key) {
-        onDispose { win.areas.remove(key) }
+    // Schwebende Kopie (z. B. beim Ziehen in der Liste): sieht gleich aus, meldet aber keine Fläche an.
+    val ghost = LocalDecoGhost.current
+    if (!ghost) {
+        DisposableEffect(win, key) {
+            onDispose { win.areas.remove(key) }
+        }
     }
     Modifier
-        .onGloballyPositioned {
-            val rect = Rect(it.positionInRoot(), it.size.toSize())
-            if (win.areas[key]?.rectInRoot != rect) win.areas[key] = AreaInfo(rect, shape)
-        }
+        .then(
+            if (ghost) {
+                Modifier
+            } else {
+                Modifier.onGloballyPositioned {
+                    val rect = Rect(it.positionInRoot(), it.size.toSize())
+                    if (win.areas[key]?.rectInRoot != rect) win.areas[key] = AreaInfo(rect, shape)
+                }
+            },
+        )
         .drawWithContent {
             val outline = shape.createOutline(size, layoutDirection, this)
             drawOutline(outline, vm.tintColor(win.window, key) ?: background)

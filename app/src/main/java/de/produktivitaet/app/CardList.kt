@@ -10,9 +10,18 @@ import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.platform.LocalDensity
 import kotlinx.coroutines.launch
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.layout.offset
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.unit.IntOffset
+import kotlin.math.roundToInt
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -53,12 +62,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.zIndex
 import kotlin.math.abs
 
 /**
@@ -95,6 +102,7 @@ fun CardList(vm: MainViewModel, forTemplates: Boolean, poolId: Long?, modifier: 
     // Zähler je Pool: springt hoch, wenn eine Karte hineingelegt wurde (löst die Animation aus).
     val poolPulses = remember { mutableStateMapOf<Long, Int>() }
     val density = LocalDensity.current
+    val haptic = LocalHapticFeedback.current
     var hoverPool by remember { mutableStateOf<Long?>(null) }
     var moved by remember { mutableStateOf(false) }
     // Zeitpunkt des letzten Loslassens: verhindert, dass ein Pool nach langem Drücken aufgeht.
@@ -178,118 +186,8 @@ fun CardList(vm: MainViewModel, forTemplates: Boolean, poolId: Long?, modifier: 
         lastDragEnd[0] = System.currentTimeMillis()
     }
 
-    // Beim Ziehen am oberen oder unteren Rand automatisch mitscrollen – auch wenn der Finger stillhält.
-    LaunchedEffect(draggingKey) {
-        if (draggingKey == null) return@LaunchedEffect
-        val edge = with(density) { 80.dp.toPx() }
-        val maxSpeed = with(density) { 16.dp.toPx() }
-        while (true) {
-            withFrameNanos { }
-            if (draggingKey == null) break
-            val layout = listState.layoutInfo
-            val finger = visualTop + grabY
-            val start = layout.viewportStartOffset + edge
-            val end = layout.viewportEndOffset - edge
-            var speed = when {
-                finger > end -> maxSpeed * ((finger - end) / edge).coerceIn(0.15f, 1f)
-                finger < start -> -maxSpeed * ((start - finger) / edge).coerceIn(0.15f, 1f)
-                else -> 0f
-            }
-            // Nie so weit scrollen, dass der Platz der gezogenen Karte ganz aus dem Bild rutscht.
-            val cur = layout.visibleItemsInfo.firstOrNull { it.key == draggingKey }
-            val margin = 8f
-            speed = when {
-                cur == null -> 0f
-                speed > 0f -> minOf(speed, cur.offset + cur.size - layout.viewportStartOffset - margin).coerceAtLeast(0f)
-                else -> maxOf(speed, cur.offset - layout.viewportEndOffset + margin).coerceAtMost(0f)
-            }
-            if (speed != 0f) listState.dispatchRawDelta(speed)
-            onDragMove()
-        }
-    }
-
-    Column(modifier) {
-        LazyColumn(
-            state = listState,
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            item(key = "kopf") {
-                ListHeader(
-                    forTemplates = forTemplates,
-                    inPool = poolId != null,
-                    searchOpen = searchOpen,
-                    query = query,
-                    onQuery = { query = it },
-                    onToggleSearch = {
-                        searchOpen = !searchOpen
-                        if (!searchOpen) query = ""
-                    },
-                    onAdd = { if (forTemplates) vm.newTemplate(poolId) else vm.newTask(poolId = poolId) },
-                    onAddPool = { newPool = true },
-                )
-            }
-            if (shown.isEmpty()) {
-                item(key = "leer") {
-                    Text(
-                        when {
-                            searching -> "Nichts gefunden."
-                            forTemplates -> "Noch keine Vorlagen."
-                            else -> "Noch keine Aufgaben."
-                        },
-                        color = Muted,
-                        fontSize = 15.sp,
-                    )
-                }
-            }
-            items(shown, key = { it.key }) { entry ->
-                val isDragged = entry.key == draggingKey
-                val itemModifier = Modifier
-                    .zIndex(if (isDragged) 1f else 0f)
-                    .graphicsLayer {
-                        if (isDragged) {
-                            val off = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.key == entry.key }?.offset
-                            translationY = if (off != null) visualTop - off else 0f
-                        }
-                        // Über einem Pool wird die Karte kleiner – sie "fällt" gleich hinein.
-                        val s = if (!isDragged) 1f else if (hoverPool != null) 0.9f else 1.03f
-                        scaleX = s
-                        scaleY = s
-                        alpha = if (isDragged && hoverPool != null) 0.85f else 1f
-                    }
-                    .then(if (isDragged) Modifier else Modifier.animateItem())
-                    .pointerInput(entry.key, searching) {
-                        if (searching) return@pointerInput
-                        detectDragGesturesAfterLongPress(
-                            onDragStart = { pos ->
-                                working.clear()
-                                working.addAll(store.entries(forTemplates, poolId))
-                                val layout = listState.layoutInfo
-                                visualTop = layout.visibleItemsInfo.firstOrNull { it.key == entry.key }?.offset?.toFloat() ?: 0f
-                                grabY = pos.y
-                                dragDistance = 0f
-                                draggingKey = entry.key
-                                moved = false
-                                hoverPool = null
-                            },
-                            onDrag = { change, amount ->
-                                change.consume()
-                                val layout = listState.layoutInfo
-                                // Finger bleibt im sichtbaren Bereich der Liste.
-                                visualTop = (visualTop + amount.y).coerceIn(
-                                    layout.viewportStartOffset - grabY,
-                                    layout.viewportEndOffset - grabY,
-                                )
-                                dragDistance += abs(amount.y)
-                                if (dragDistance > viewConfiguration.touchSlop) moved = true
-                                onDragMove()
-                            },
-                            onDragEnd = { finishDrag() },
-                            onDragCancel = { finishDrag() },
-                        )
-                    }
-                Box(itemModifier) {
+    @Composable
+    fun EntryContent(entry: ListEntry) {
                     when (entry) {
                         is ListEntry.Folder -> PoolCard(
                             pool = entry.pool,
@@ -335,8 +233,163 @@ fun CardList(vm: MainViewModel, forTemplates: Boolean, poolId: Long?, modifier: 
                             }
                         }
                     }
+    }
+
+    // Beim Ziehen am oberen oder unteren Rand automatisch mitscrollen – auch wenn der Finger stillhält.
+    LaunchedEffect(draggingKey) {
+        if (draggingKey == null) return@LaunchedEffect
+        val edge = with(density) { 80.dp.toPx() }
+        val maxSpeed = with(density) { 16.dp.toPx() }
+        while (true) {
+            withFrameNanos { }
+            if (draggingKey == null) break
+            val layout = listState.layoutInfo
+            val finger = visualTop + grabY
+            val start = layout.viewportStartOffset + edge
+            val end = layout.viewportEndOffset - edge
+            var speed = when {
+                finger > end -> maxSpeed * ((finger - end) / edge).coerceIn(0.15f, 1f)
+                finger < start -> -maxSpeed * ((start - finger) / edge).coerceIn(0.15f, 1f)
+                else -> 0f
+            }
+            // Nie so weit scrollen, dass der Platz der gezogenen Karte ganz aus dem Bild rutscht.
+            val cur = layout.visibleItemsInfo.firstOrNull { it.key == draggingKey }
+            val margin = 8f
+            speed = when {
+                // Platz doch einmal aus dem Bild gerutscht: zu ihm hin scrollen, damit es weitergeht.
+                cur == null -> {
+                    val first = layout.visibleItemsInfo.firstOrNull()?.index ?: 0
+                    val idx = working.indexOfFirst { it.key == draggingKey } + 1
+                    if (idx < first) -maxSpeed else maxSpeed
+                }
+                speed > 0f -> minOf(speed, cur.offset + cur.size - layout.viewportStartOffset - margin).coerceAtLeast(0f)
+                else -> maxOf(speed, cur.offset - layout.viewportEndOffset + margin).coerceAtMost(0f)
+            }
+            if (speed != 0f) listState.dispatchRawDelta(speed)
+            onDragMove()
+        }
+    }
+
+    Column(modifier) {
+        Box(
+            Modifier
+                .fillMaxSize()
+                // Das Ziehen hängt an der ganzen Liste, nicht an der Karte: So bricht es nicht ab,
+                // wenn die Liste die Karte beim Scrollen kurz aus dem Bild nimmt.
+                .pointerInput(searching, forTemplates, poolId) {
+                    if (searching) return@pointerInput
+                    awaitEachGesture {
+                        val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                        // Langes Drücken abwarten; vorher bewegen oder loslassen = normales Scrollen bzw. Tippen.
+                        val aborted = withTimeoutOrNull<Boolean>(viewConfiguration.longPressTimeoutMillis) {
+                            while (true) {
+                                val ch = awaitPointerEvent(PointerEventPass.Initial).changes.firstOrNull { it.id == down.id }
+                                    ?: return@withTimeoutOrNull true
+                                if (!ch.pressed || ch.isConsumed ||
+                                    (ch.position - down.position).getDistance() > viewConfiguration.touchSlop
+                                ) {
+                                    return@withTimeoutOrNull true
+                                }
+                            }
+                            @Suppress("UNREACHABLE_CODE")
+                            true
+                        }
+                        if (aborted != null) return@awaitEachGesture
+                        val layout = listState.layoutInfo
+                        val y = down.position.y + layout.viewportStartOffset
+                        val item = layout.visibleItemsInfo.firstOrNull {
+                            val k = it.key as? String
+                            k != null && (k.startsWith("t") || k.startsWith("p")) && y >= it.offset && y <= it.offset + it.size
+                        } ?: return@awaitEachGesture
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        working.clear()
+                        working.addAll(store.entries(forTemplates, poolId))
+                        visualTop = item.offset.toFloat()
+                        grabY = y - item.offset
+                        dragDistance = 0f
+                        moved = false
+                        hoverPool = null
+                        draggingKey = item.key as String
+                        try {
+                            while (true) {
+                                val ch = awaitPointerEvent(PointerEventPass.Initial).changes.firstOrNull { it.id == down.id } ?: break
+                                ch.consume()
+                                if (!ch.pressed) break
+                                // Finger bleibt im sichtbaren Bereich der Liste.
+                                val fy = ch.position.y.coerceIn(0f, size.height.toFloat()) + listState.layoutInfo.viewportStartOffset
+                                val newTop = fy - grabY
+                                dragDistance += abs(newTop - visualTop)
+                                visualTop = newTop
+                                if (dragDistance > viewConfiguration.touchSlop) moved = true
+                                onDragMove()
+                            }
+                        } finally {
+                            finishDrag()
+                        }
+                    }
+                },
+        ) {
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            item(key = "kopf") {
+                ListHeader(
+                    forTemplates = forTemplates,
+                    inPool = poolId != null,
+                    searchOpen = searchOpen,
+                    query = query,
+                    onQuery = { query = it },
+                    onToggleSearch = {
+                        searchOpen = !searchOpen
+                        if (!searchOpen) query = ""
+                    },
+                    onAdd = { if (forTemplates) vm.newTemplate(poolId) else vm.newTask(poolId = poolId) },
+                    onAddPool = { newPool = true },
+                )
+            }
+            if (shown.isEmpty()) {
+                item(key = "leer") {
+                    Text(
+                        when {
+                            searching -> "Nichts gefunden."
+                            forTemplates -> "Noch keine Vorlagen."
+                            else -> "Noch keine Aufgaben."
+                        },
+                        color = Muted,
+                        fontSize = 15.sp,
+                    )
                 }
             }
+            items(shown, key = { it.key }) { entry ->
+                // Die gezogene Karte bleibt als unsichtbarer Platzhalter in der Liste; gezeichnet wird sie darüber.
+                val isDragged = entry.key == draggingKey
+                Box(if (isDragged) Modifier.graphicsLayer { alpha = 0f } else Modifier.animateItem()) {
+                    EntryContent(entry)
+                }
+            }
+        }
+        // Die gezogene Karte schwebt über der Liste.
+        val dragged = draggingKey?.let { k -> working.firstOrNull { it.key == k } }
+        if (dragged != null) {
+            Box(
+                Modifier
+                    .offset { IntOffset(0, (visualTop - listState.layoutInfo.viewportStartOffset).roundToInt()) }
+                    .padding(horizontal = 16.dp)
+                    .fillMaxWidth()
+                    .graphicsLayer {
+                        // Über einem Pool wird die Karte kleiner – sie "fällt" gleich hinein.
+                        val sc = if (hoverPool != null) 0.9f else 1.03f
+                        scaleX = sc
+                        scaleY = sc
+                        alpha = if (hoverPool != null) 0.85f else 1f
+                    },
+            ) {
+                CompositionLocalProvider(LocalDecoGhost provides true) { EntryContent(dragged) }
+            }
+        }
         }
     }
 
