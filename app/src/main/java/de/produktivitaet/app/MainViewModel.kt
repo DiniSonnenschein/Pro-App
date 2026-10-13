@@ -176,6 +176,16 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     var homePlace by mutableStateOf<Place?>(null)
     var homeMinutes by mutableStateOf("")
     var homeHint by mutableStateOf<String?>(null)
+    /** Gewählter Aufgaben-Pool: Gezogen wird nur aus diesem; null = alle Aufgaben. */
+    var homePoolId by mutableStateOf<Long?>(null)
+
+    /** Der gewählte Pool, falls es ihn noch gibt. */
+    val homePool: Pool? get() = homePoolId?.let { store.findPool(it) }?.takeIf { !it.forTemplates }
+
+    fun deletePlace(id: String) {
+        if (homePlace?.id == id) homePlace = null
+        store.deletePlace(id)
+    }
 
     var overviewTab by mutableIntStateOf(0)
 
@@ -197,7 +207,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun drawTask() {
         // Ohne Ort bzw. Zeit gibt es keine Einschränkung.
         homeHint = null
-        open(Screen.Draw(eligibleTasks(store.tasks, homePlace, homeMinutes.toIntOrNull()).randomOrNull()?.id))
+        open(Screen.Draw(eligibleTasks(store.tasks, homePlace, homeMinutes.toIntOrNull(), homePool?.id).randomOrNull()?.id))
     }
 
     /**
@@ -391,8 +401,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** Pilz im Fungarium angetippt: ein Exemplar herausnehmen und mittig ins vorherige Fenster setzen. */
-    fun pickFromFungarium(species: String) {
-        val mushroom = store.takeFromFungarium(species) ?: return
+    fun pickFromFungarium(species: String, size: Int? = null) {
+        val mushroom = store.takeFromFungarium(species, size) ?: return
         back()
         val window = windowId(screen) ?: return
         val size = windowSizesDp[window] ?: Offset(360f, 640f)

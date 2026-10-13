@@ -59,6 +59,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.graphics.Color
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.size
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.platform.LocalContext
@@ -71,6 +76,7 @@ import java.time.LocalDate
 @Composable
 fun HomeScreen(vm: MainViewModel) {
     var pickPlace by remember { mutableStateOf(false) }
+    var pickPool by remember { mutableStateOf(false) }
 
     Box(Modifier.fillMaxSize()) {
         Column(
@@ -115,10 +121,23 @@ fun HomeScreen(vm: MainViewModel) {
         Box(Modifier.align(Alignment.TopEnd).padding(8.dp)) {
             AppMenu(vm)
         }
+        PoolChooser(vm, { pickPool = true }, Modifier.align(Alignment.TopStart).padding(16.dp))
+    }
+
+    if (pickPool) {
+        PoolPickDialog(
+            vm = vm,
+            onPick = {
+                vm.homePoolId = it.id
+                pickPool = false
+            },
+            onDismiss = { pickPool = false },
+        )
     }
 
     if (pickPlace) {
         SinglePlaceDialog(
+            places = vm.store.places,
             selected = vm.homePlace,
             onSelect = {
                 vm.homePlace = it
@@ -127,6 +146,61 @@ fun HomeScreen(vm: MainViewModel) {
             },
             onDismiss = { pickPlace = false },
         )
+    }
+}
+
+/** Kleines Ordner-Symbol: aktiv (weiß gefüllt) wird nur aus dem gewählten Pool gezogen; nochmal tippen = aus. */
+@Composable
+private fun PoolChooser(vm: MainViewModel, onOpen: () -> Unit, modifier: Modifier) {
+    val pool = vm.homePool
+    val bg = if (pool != null) White else areaColor("ordner", Black)
+    val fg = onColor(bg)
+    Row(modifier, verticalAlignment = Alignment.CenterVertically) {
+        Box(
+            Modifier
+                .size(44.dp)
+                .decoArea("ordner", CircleShape, Black)
+                .clip(CircleShape)
+                .background(if (pool != null) White else Color.Transparent)
+                .border(1.dp, fg, CircleShape)
+                .clickable { if (pool != null) vm.homePoolId = null else onOpen() },
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(painterResource(R.drawable.ic_ordner), "Pool wählen", tint = fg, modifier = Modifier.size(22.dp))
+        }
+        if (pool != null) {
+            Spacer(Modifier.width(10.dp))
+            Text(pool.name, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 200.dp))
+        }
+    }
+}
+
+/** Auswahl eines Aufgaben-Pools für die Startseite. */
+@Composable
+private fun PoolPickDialog(vm: MainViewModel, onPick: (Pool) -> Unit, onDismiss: () -> Unit) {
+    val pools = vm.store.pools.filter { !it.forTemplates }.sortedBy { it.sortKey }
+    AppDialog("Aus welchem Pool?", onDismiss) {
+        if (pools.isEmpty()) {
+            Text("Du hast noch keine Aufgaben-Pools. Anlegen kannst du sie in der Übersicht.", color = Muted, fontSize = 16.sp)
+        }
+        Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            pools.forEach { pool ->
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .clip(CardShape)
+                        .border(1.dp, Muted, CardShape)
+                        .clickable { onPick(pool) }
+                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(painterResource(R.drawable.ic_ordner), null, tint = White, modifier = Modifier.size(20.dp))
+                    Spacer(Modifier.width(10.dp))
+                    Text(pool.name, fontSize = 16.sp, color = White, modifier = Modifier.weight(1f))
+                    Text("${vm.store.poolSize(pool)}", fontSize = 14.sp, color = Muted)
+                }
+            }
+        }
     }
 }
 
@@ -437,6 +511,7 @@ fun EditorScreen(vm: MainViewModel) {
 
     placesFor?.let { step ->
         MultiPlaceDialog(
+            places = vm.store.places,
             selected = step.places,
             onDone = {
                 step.places = it
@@ -477,7 +552,7 @@ private fun StepFields(step: StepDraft, index: Int, showTitle: Boolean, onPickPl
                 decoKey = "schritt$index-titel",
             )
         }
-        SelectField(step.places.label, "Orte", { onPickPlaces(step) }, Modifier.fillMaxWidth(), decoKey = "schritt$index-orte")
+        SelectField(placesText(step.places), "Orte", { onPickPlaces(step) }, Modifier.fillMaxWidth(), decoKey = "schritt$index-orte")
         TextInput(
             value = step.minutes,
             onValueChange = { step.minutes = it },
@@ -512,7 +587,7 @@ private fun TemplatePickerDialog(templates: List<Task>, onPick: (Task) -> Unit, 
                     val info = if (template.steps.size > 1) {
                         "${template.steps.size} Schritte"
                     } else {
-                        "${step.places.label} · ${step.minutes} Min."
+                        "${placesText(step.places)} · ${step.minutes} Min."
                     }
                     Text(info, fontSize = 13.sp, color = Muted)
                 }

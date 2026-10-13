@@ -7,6 +7,8 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -426,9 +428,10 @@ private fun ChoiceRow(onClick: () -> Unit, control: @Composable () -> Unit, text
 
 /** Startseite: genau ein Ort. */
 @Composable
-fun SinglePlaceDialog(selected: Place?, onSelect: (Place) -> Unit, onDismiss: () -> Unit) {
+fun SinglePlaceDialog(places: List<Place>, selected: Place?, onSelect: (Place) -> Unit, onDismiss: () -> Unit) {
     AppDialog("Wo bist du?", onDismiss) {
-        Place.entries.forEach { place ->
+        Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState())) {
+        places.forEach { place ->
             ChoiceRow(
                 onClick = { onSelect(place) },
                 control = {
@@ -441,12 +444,13 @@ fun SinglePlaceDialog(selected: Place?, onSelect: (Place) -> Unit, onDismiss: ()
                 text = place.label,
             )
         }
+        }
     }
 }
 
 /** Aufgabe: ein oder mehrere Orte; "Überall" (mit Abstand darunter) schließt alle ein. */
 @Composable
-fun MultiPlaceDialog(selected: Places, onDone: (Places) -> Unit, onDismiss: () -> Unit) {
+fun MultiPlaceDialog(places: List<Place>, selected: Places, onDone: (Places) -> Unit, onDismiss: () -> Unit) {
     var current by remember { mutableStateOf(selected) }
     val checkboxColors = CheckboxDefaults.colors(
         checkedColor = White,
@@ -454,12 +458,14 @@ fun MultiPlaceDialog(selected: Places, onDone: (Places) -> Unit, onDismiss: () -
         checkmarkColor = Black,
     )
     AppDialog("Orte", onDismiss) {
-        Place.entries.forEach { place ->
-            ChoiceRow(
-                onClick = { current = current.toggle(place) },
-                control = { Checkbox(checked = place in current, onCheckedChange = null, colors = checkboxColors) },
-                text = place.label,
-            )
+        Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState())) {
+            places.forEach { place ->
+                ChoiceRow(
+                    onClick = { current = current.toggle(place, places) },
+                    control = { Checkbox(checked = place in current, onCheckedChange = null, colors = checkboxColors) },
+                    text = place.label,
+                )
+            }
         }
         Spacer(Modifier.height(14.dp))
         ChoiceRow(
@@ -497,7 +503,12 @@ fun ConfirmDialog(
     }
 }
 
-private fun stepInfo(step: Step) = "${step.places.label} · ${step.minutes} Min."
+@Composable
+private fun stepInfo(step: Step) = "${placesText(step.places)} · ${step.minutes} Min."
+
+/** Orte als Text, mit den aktuell angelegten Orten. */
+@Composable
+fun placesText(places: Places): String = places.label(LocalAppViewModel.current?.store?.places ?: emptyList())
 
 /**
  * Karte für eine Aufgabe oder Vorlage. Bei mehreren Schritten werden alle aufgelistet;

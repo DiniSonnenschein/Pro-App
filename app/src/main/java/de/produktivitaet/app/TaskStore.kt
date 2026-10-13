@@ -34,9 +34,8 @@ class TaskStore(context: Context, private val catalog: MushroomCatalog) {
     var nextBeing by mutableStateOf<String?>(null)
         private set
 
-    /** Fungarium-Schalter: beim Herausnehmen zuerst die großen (true) oder die kleinen Exemplare. */
-    var bigFirst by mutableStateOf(true)
-        private set
+    /** Auswählbare Orte in Anzeige-Reihenfolge (alphabetisch). "Überall" ist kein Ort, sondern eine Markierung. */
+    val places = mutableStateListOf<Place>().apply { addAll(Place.sorted(Place.DEFAULTS)) }
 
     /** Pools (Ordner) der Übersicht. */
     val pools = mutableStateListOf<Pool>()
@@ -399,17 +398,46 @@ class TaskStore(context: Context, private val catalog: MushroomCatalog) {
         return mushrooms.count { it.species == species && it.id !in placed }
     }
 
-    /** Nimmt ein Exemplar aus dem Fungarium – je nach Schalter das größte oder das kleinste. */
-    fun takeFromFungarium(species: String): Mushroom? {
+    /** Wie viele Exemplare je Größe gerade im Fungarium liegen (nur Größen mit mindestens einem). */
+    fun availableBySize(species: String): Map<Int, Int> {
         val placed = placements.mapTo(HashSet()) { it.mushroomId }
-        val free = mushrooms.filter { it.species == species && it.id !in placed }
-        return if (bigFirst) free.maxByOrNull { it.size } else free.minByOrNull { it.size }
+        return mushrooms.filter { it.species == species && it.id !in placed }
+            .groupingBy { it.size }.eachCount().toSortedMap()
     }
 
-    fun toggleBigFirst() {
-        bigFirst = !bigFirst
+    /** Nimmt ein Exemplar aus dem Fungarium – das größte oder eines der gewünschten Größe. */
+    fun takeFromFungarium(species: String, size: Int? = null): Mushroom? {
+        val placed = placements.mapTo(HashSet()) { it.mushroomId }
+        val free = mushrooms.filter { it.species == species && it.id !in placed }
+        return if (size == null) free.maxByOrNull { it.size } else free.firstOrNull { it.size == size }
+    }
+
+    // ---- Orte ----
+
+    /** Neuen Ort anlegen; false, wenn der Name leer ist oder es ihn schon gibt. */
+    fun addPlace(name: String): Boolean {
+        val label = name.trim()
+        if (label.isEmpty() || label.equals("Überall", true) || places.any { it.label.equals(label, true) }) return false
+        val place = Place("p${System.currentTimeMillis()}", label)
+        val sorted = Place.sorted(places + place)
+        places.clear()
+        places.addAll(sorted)
+        save()
+        return true
+    }
+
+    /** Ort löschen; Schritte, die nur dort möglich waren, gelten danach überall. */
+    fun deletePlace(id: String) {
+        places.removeAll { it.id == id }
+        fun Task.cleaned() = copy(steps = steps.map { it.copy(places = it.places.without(id)) })
+        for (i in tasks.indices) tasks[i] = tasks[i].cleaned()
+        for (i in templates.indices) templates[i] = templates[i].cleaned()
         save()
     }
+
+    /** Wie viele Schritte (Aufgaben und Vorlagen) nur an diesem einen Ort möglich sind. */
+    fun stepsOnlyAt(id: String): Int =
+        (tasks + templates).sumOf { t -> t.steps.count { !it.places.everywhere && it.places.ids == setOf(id) } }
 
     fun placementOf(mushroomId: Long): Placement? = placements.firstOrNull { it.mushroomId == mushroomId }
 
@@ -624,7 +652,7 @@ class TaskStore(context: Context, private val catalog: MushroomCatalog) {
         val rewardedDay: Long?,
         val rewardedWeek: Long?,
         val placements: List<Placement>,
-        val bigFirst: Boolean,
+        val places: List<Place>,
         val pools: List<Pool>,
         val unlockedColors: List<Int>,
         val tints: List<Tint>,
@@ -647,7 +675,8 @@ class TaskStore(context: Context, private val catalog: MushroomCatalog) {
         weeklyGoal = data.weeklyGoal
         rewardedDay = data.rewardedDay
         rewardedWeek = data.rewardedWeek
-        bigFirst = data.bigFirst
+        places.clear()
+        places.addAll(data.places)
         pools.clear()
         pools.addAll(data.pools)
         unlockedColors.clear()
@@ -657,7 +686,7 @@ class TaskStore(context: Context, private val catalog: MushroomCatalog) {
     }
 
     private fun toJson(): JSONObject = JSONObject()
-        .put("version", 6)
+        .put("version", 7)
         .put("colors", JSONArray().apply { unlockedColors.forEach { put(it) } })
         .put("tints", JSONArray().apply { tints.forEach { put(JSONObject().put("anchor", it.anchor.toJson()).put("color", it.color)) } })
         .put("pools", JSONArray().apply {
@@ -680,7 +709,7 @@ class TaskStore(context: Context, private val catalog: MushroomCatalog) {
         .put("mushrooms", JSONArray().apply { mushrooms.forEach { put(it.toJson()) } })
         .put("nextMushroom", nextMushroom?.let { JSONObject().put("species", it.species).put("size", it.size) })
         .put("placements", JSONArray().apply { placements.forEach { put(it.toJson()) } })
-        .put("bigFirst", bigFirst)
+        .put("places", JSONArray().apply { places.forEach { put(JSONObject().put("id", it.id).put("label", it.label)) } })
 
     private fun parse(root: JSONObject): Data {
         val next = root.optJSONObject("nextMushroom")
@@ -692,7 +721,10 @@ class TaskStore(context: Context, private val catalog: MushroomCatalog) {
             },
             next = next?.let { MushroomRoll(it.getString("species"), it.getInt("size").coerceIn(1, 5)) },
             placements = root.optJSONArray("placements").mapObjects { it.toPlacement() }.filterNotNull(),
-            bigFirst = root.optBoolean("bigFirst", true),
+            places = root.optJSONArray("places").let { arr ->
+                if (arr == null) Place.sorted(Place.DEFAULTS)
+                else Place.sorted((0 until arr.length()).map { i -> arr.getJSONObject(i).let { Place(it.getString("id"), it.getString("label")) } })
+            },
             unlockedColors = root.optJSONArray("colors").let { arr ->
                 val saved = if (arr == null) emptyList() else (0 until arr.length()).map { arr.getInt(it) }
                 (Palette.STARTERS + saved).filter { it in 0 until Palette.size }.distinct()
@@ -763,7 +795,7 @@ private fun Step.toJson(): JSONObject = JSONObject()
     .put("title", title)
     .put("minutes", minutes)
     .put("everywhere", places.everywhere)
-    .put("places", JSONArray().apply { places.set.forEach { put(it.name) } })
+    .put("places", JSONArray().apply { places.ids.forEach { put(it) } })
 
 private fun Mushroom.toJson(): JSONObject = JSONObject()
     .put("id", id)
@@ -848,13 +880,12 @@ private val RENAMED = mapOf(
 )
 
 /** Die vier Orte der ersten Version – wer die alle hatte, hatte "Überall" gewählt. */
-private val ORIGINAL_PLACES = setOf(Place.HOME, Place.TRANSIT, Place.CAFE, Place.CITY)
+private val ORIGINAL_PLACES = setOf("HOME", "TRANSIT", "CAFE", "CITY")
 
 private fun JSONObject.toStep(): Step {
     val names = getJSONArray("places")
     val set = (0 until names.length())
-        .mapNotNull { i -> Place.entries.firstOrNull { it.name == names.getString(i) } }
-        .toSet()
+        .mapTo(HashSet()) { i -> names.getString(i) }
     val everywhere = if (has("everywhere")) getBoolean("everywhere") else set.containsAll(ORIGINAL_PLACES)
     return Step(
         title = optString("title", ""),

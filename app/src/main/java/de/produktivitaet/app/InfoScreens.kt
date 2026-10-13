@@ -17,6 +17,12 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.runtime.remember
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -71,6 +77,8 @@ fun SettingsScreen(vm: MainViewModel) {
                 unit = weeklyUnit,
                 onUnit = { weeklyUnit = it },
             )
+            PlacesEditor(vm)
+            Spacer(Modifier.height(4.dp))
         }
         Column(Modifier.padding(16.dp)) {
             if (daily == null || weekly == null) {
@@ -84,6 +92,71 @@ fun SettingsScreen(vm: MainViewModel) {
                 enabled = daily != null && weekly != null,
             )
         }
+    }
+}
+
+/** Orte anlegen und löschen; wirkt sofort. "Überall" umfasst immer alle Orte und bleibt. */
+@Composable
+private fun PlacesEditor(vm: MainViewModel) {
+    val store = vm.store
+    var newName by rememberSaveable { mutableStateOf("") }
+    var error by rememberSaveable { mutableStateOf<String?>(null) }
+    var deleting by remember { mutableStateOf<Place?>(null) }
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Text("Orte", fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
+        Text("Änderungen an den Orten gelten sofort.", color = Muted, fontSize = 14.sp)
+        store.places.forEach { place ->
+            Row(
+                Modifier.fillMaxWidth().border(1.dp, Muted, CardShape).padding(start = 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(place.label, fontSize = 16.sp, modifier = Modifier.weight(1f))
+                IconButton(onClick = { deleting = place }) {
+                    Icon(Icons.Filled.Delete, "Ort löschen", tint = White)
+                }
+            }
+        }
+        Row(
+            Modifier.fillMaxWidth().border(1.dp, Dim, CardShape).padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("Überall", fontSize = 16.sp, modifier = Modifier.weight(1f))
+            Text("umfasst immer alle Orte", color = Muted, fontSize = 13.sp)
+        }
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            TextInput(
+                value = newName,
+                onValueChange = {
+                    newName = it
+                    error = null
+                },
+                label = "Neuer Ort",
+                modifier = Modifier.weight(1f),
+            )
+            CircleIconButton(Icons.Filled.Add, "Ort hinzufügen", {
+                if (store.addPlace(newName)) {
+                    newName = ""
+                } else {
+                    error = if (newName.isBlank()) "Bitte gib einen Namen ein." else "Diesen Ort gibt es schon."
+                }
+            }, size = 52.dp)
+        }
+        error?.let { Text(it, color = HintRed, fontSize = 14.sp) }
+    }
+
+    deleting?.let { place ->
+        val only = store.stepsOnlyAt(place.id)
+        ConfirmDialog(
+            title = "Ort löschen?",
+            text = "„${place.label}“ wird gelöscht." +
+                if (only > 0) " ${if (only == 1) "Ein Schritt war nur dort möglich und gilt" else "$only Schritte waren nur dort möglich und gelten"} danach überall." else "",
+            confirmText = "Löschen",
+            onConfirm = {
+                vm.deletePlace(place.id)
+                deleting = null
+            },
+            onDismiss = { deleting = null },
+        )
     }
 }
 

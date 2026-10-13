@@ -9,7 +9,9 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -72,6 +74,7 @@ import kotlin.math.exp
 import kotlin.math.sin
 import kotlin.random.Random
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun FungariumScreen(vm: MainViewModel) {
     val store = vm.store
@@ -83,21 +86,11 @@ fun FungariumScreen(vm: MainViewModel) {
     val list = if (showBeings) vm.catalog.beings else vm.catalog.mushrooms
     val found = list.count { (earned[it.id] ?: 0) > 0 }
     var confirmReset by remember { mutableStateOf(false) }
+    // Langes Drücken auf einen Pilz: Größe auswählen.
+    var chooseSize by remember { mutableStateOf<String?>(null) }
 
     Column(Modifier.fillMaxSize()) {
         TopBar("Fungarium", vm::back) {
-            if (tab == 0) {
-                // Schalter: welche Größe beim Herausnehmen zuerst kommt.
-                Box(
-                    Modifier
-                        .clip(CircleShape)
-                        .border(1.dp, White, CircleShape)
-                        .clickable { store.toggleBigFirst() }
-                        .padding(horizontal = 12.dp, vertical = 7.dp),
-                ) {
-                    Text(if (store.bigFirst) "Große zuerst" else "Kleine zuerst", fontSize = 13.sp)
-                }
-            }
             if (!vm.decorMode) {
                 IconButton(onClick = vm::enterDecorMode) { Icon(Icons.Filled.Edit, "Pilz-Modus", tint = White) }
             }
@@ -161,7 +154,11 @@ fun FungariumScreen(vm: MainViewModel) {
                     horizontalAlignment = Alignment.CenterHorizontally,
                     modifier = Modifier
                         .clip(CardShape)
-                        .clickable(enabled = available > 0) { vm.pickFromFungarium(species.id) },
+                        .combinedClickable(
+                            enabled = available > 0,
+                            onClick = { vm.pickFromFungarium(species.id) },
+                            onLongClick = if (showBeings) null else ({ chooseSize = species.id }),
+                        ),
                 ) {
                     Box(
                         Modifier
@@ -234,6 +231,34 @@ fun FungariumScreen(vm: MainViewModel) {
             },
             onDismiss = { confirmReset = false },
         )
+    }
+
+    chooseSize?.let { id ->
+        val bySize = store.availableBySize(id)
+        val name = vm.catalog.mushrooms.firstOrNull { it.id == id }?.name ?: ""
+        AppDialog(name, { chooseSize = null }) {
+            Text("Welche Größe möchtest du herausnehmen?", color = Muted, fontSize = 15.sp)
+            Spacer(Modifier.height(12.dp))
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                bySize.entries.reversed().forEach { (size, count) ->
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clip(CardShape)
+                            .border(1.dp, Muted, CardShape)
+                            .clickable {
+                                chooseSize = null
+                                vm.pickFromFungarium(id, size)
+                            }
+                            .padding(horizontal = 14.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(Rewards.SIZE_NAMES[size - 1], fontSize = 16.sp, color = White, modifier = Modifier.weight(1f))
+                        Text("× $count", fontSize = 15.sp, color = Muted)
+                    }
+                }
+            }
+        }
     }
 }
 

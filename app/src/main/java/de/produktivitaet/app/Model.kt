@@ -6,43 +6,62 @@ import java.time.YearMonth
 import java.time.format.DateTimeFormatter
 import kotlin.random.Random
 
-/** Reihenfolge = alphabetische Anzeige-Reihenfolge. Gespeichert wird der Name, daher ist Umsortieren gefahrlos. */
-enum class Place(val label: String) {
-    CAFE("Café"),
-    TRANSIT("Öffis"),
-    OTHER("Sonstiges"),
-    CITY("Stadt"),
-    TRAIN("Zugfahrt"),
-    HOME("Zuhause"),
+/**
+ * Ein Ort, den man auf der Startseite wählen und Schritten zuordnen kann. Orte lassen sich in den
+ * Einstellungen anlegen und löschen; gespeichert wird die [id] (bei den mitgelieferten Orten der alte Enum-Name).
+ */
+data class Place(val id: String, val label: String) {
+    companion object {
+        val DEFAULTS = listOf(
+            Place("CAFE", "Café"),
+            Place("TRANSIT", "Öffis"),
+            Place("OTHER", "Sonstiges"),
+            Place("CITY", "Stadt"),
+            Place("TRAIN", "Zugfahrt"),
+            Place("HOME", "Zuhause"),
+        )
+
+        private val collator = java.text.Collator.getInstance(java.util.Locale.GERMAN)
+
+        /** Anzeige-Reihenfolge: alphabetisch. */
+        fun sorted(places: Collection<Place>): List<Place> = places.sortedWith(compareBy(collator) { it.label })
+    }
 }
 
 /**
- * Orte eines Schritts. [everywhere] ist eine eigene Markierung, damit "Überall" auch
+ * Orte eines Schritts (als Ort-IDs). [everywhere] ist eine eigene Markierung, damit "Überall" auch
  * Orte einschließt, die später einmal dazukommen.
  */
-data class Places(val set: Set<Place> = emptySet(), val everywhere: Boolean = false) {
-    val isEmpty: Boolean get() = !everywhere && set.isEmpty()
+data class Places(val ids: Set<String> = emptySet(), val everywhere: Boolean = false) {
+    val isEmpty: Boolean get() = !everywhere && ids.isEmpty()
 
-    operator fun contains(place: Place): Boolean = everywhere || place in set
+    operator fun contains(place: Place): Boolean = everywhere || place.id in ids
 
-    val label: String
-        get() = when {
-            everywhere -> "Überall"
-            else -> Place.entries.filter { it in set }.joinToString(", ") { it.label }
-        }
+    /** Text für die Anzeige; [all] = alle vorhandenen Orte in Anzeige-Reihenfolge. */
+    fun label(all: List<Place>): String = when {
+        everywhere -> "Überall"
+        else -> all.filter { it.id in ids }.joinToString(", ") { it.label }
+    }
 
-    fun toggle(place: Place): Places = when {
-        everywhere -> Places(Place.entries.toSet() - place)
-        place in set -> Places(set - place)
-        else -> of(set + place)
+    fun toggle(place: Place, all: List<Place>): Places = when {
+        everywhere -> Places(all.mapTo(HashSet()) { it.id } - place.id)
+        place.id in ids -> Places(ids - place.id)
+        else -> of(ids + place.id, all)
     }
 
     fun toggleEverywhere(): Places = if (everywhere) Places() else Places(everywhere = true)
 
+    /** Ort gelöscht: Wäre danach kein Ort mehr übrig, gilt der Schritt überall. */
+    fun without(placeId: String): Places = when {
+        everywhere || placeId !in ids -> this
+        ids.size == 1 -> Places(everywhere = true)
+        else -> Places(ids - placeId)
+    }
+
     companion object {
         /** Sind alle Orte einzeln angehakt, ist das gleichbedeutend mit "Überall". */
-        fun of(set: Set<Place>): Places =
-            if (set.containsAll(Place.entries)) Places(everywhere = true) else Places(set)
+        fun of(ids: Set<String>, all: List<Place>): Places =
+            if (all.isNotEmpty() && ids.containsAll(all.map { it.id })) Places(everywhere = true) else Places(ids)
     }
 }
 
@@ -101,8 +120,9 @@ data class Task(
         if (steps.size > 1) copy(steps = steps.drop(1), completedSteps = completedSteps + 1) else null
 }
 
-fun eligibleTasks(tasks: List<Task>, place: Place?, availableMinutes: Int?): List<Task> =
-    tasks.filter { it.fits(place, availableMinutes) }
+/** [poolId] != null: nur Aufgaben aus diesem Pool. */
+fun eligibleTasks(tasks: List<Task>, place: Place?, availableMinutes: Int?, poolId: Long? = null): List<Task> =
+    tasks.filter { (poolId == null || it.poolId == poolId) && it.fits(place, availableMinutes) }
 
 /**
  * Ein erspieltes Sprite (Pilz oder Pilz-Wesen). [species] ist der Dateiname im Ordner assets/sprites,
