@@ -118,17 +118,19 @@ fun CardList(vm: MainViewModel, forTemplates: Boolean, poolId: Long?, modifier: 
             return
         }
         val targetKey = target.key as String
-        // Karte über der Mitte eines Pools: hineinlegen statt tauschen.
+        val from = working.indexOfFirst { it.key == key }
+        val to = working.indexOfFirst { it.key == targetKey }
+        // Karte über einem Pool: in der Mitte hineinlegen; getauscht wird erst, wenn sie
+        // auf der anderen Seite wieder herauskommt – sonst springt sie vorher am Pool vorbei.
         if (key.startsWith("t") && targetKey.startsWith("p") && !isPinnedKey(key)) {
             val rel = (c - target.offset) / target.size
-            if (rel in 0.22f..0.78f) {
-                hoverPool = targetKey.drop(1).toLong()
+            val passed = if (from < to) rel > 0.78f else rel < 0.22f
+            if (!passed) {
+                hoverPool = if (rel in 0.22f..0.78f) targetKey.drop(1).toLong() else null
                 return
             }
         }
         hoverPool = null
-        val from = working.indexOfFirst { it.key == key }
-        val to = working.indexOfFirst { it.key == targetKey }
         if (from >= 0 && to >= 0) {
             working.add(to, working.removeAt(from))
             dragOffset += cur.offset - target.offset

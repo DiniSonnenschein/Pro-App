@@ -113,7 +113,7 @@ class TaskStore(context: Context, private val catalog: MushroomCatalog) {
     fun mirrorOf(templatePoolId: Long): Pool? = pools.firstOrNull { it.sourcePoolId == templatePoolId }
 
     /** Aufgabe aus einer noch vorhandenen Vorlage: bleibt im Pool ihrer Vorlage und lässt sich nicht umsortieren. */
-    fun isPinned(task: Task): Boolean = task.templateId?.let { findTemplate(it) } != null
+    fun isPinned(task: Task): Boolean = task.templateId?.let { findTemplate(it) }?.let { taskPoolFor(it) } != null
 
     /** Pool, in den Aufgaben aus [template] gehören (Spiegel ihres Vorlagen-Pools) oder null. */
     fun taskPoolFor(template: Task): Long? = template.poolId?.let { mirrorOf(it)?.id }
@@ -198,7 +198,8 @@ class TaskStore(context: Context, private val catalog: MushroomCatalog) {
         for (i in tasks.indices) {
             val t = tasks[i]
             val template = t.templateId?.let { findTemplate(it) } ?: continue
-            val target = taskPoolFor(template)
+            // Nur Vorlagen in einem Pool binden ihre Aufgaben; die anderen dürfen überallhin.
+            val target = taskPoolFor(template) ?: continue
             if (t.poolId != target) tasks[i] = t.copy(poolId = target, sortKey = topKey(false, target))
         }
     }
@@ -235,9 +236,19 @@ class TaskStore(context: Context, private val catalog: MushroomCatalog) {
         val list = cards(forTemplates)
         val i = list.indexOfFirst { it.id == cardId }
         if (i < 0) return
+        val oldMirror = if (forTemplates) taskPoolFor(list[i]) else null
         list[i] = list[i].copy(poolId = poolId, sortKey = topKey(forTemplates, poolId))
-        // Wandert eine Vorlage, folgen ihr alle daraus entstandenen Aufgaben.
-        if (forTemplates) syncTemplateTasks()
+        if (forTemplates) {
+            // Wandert eine Vorlage in einen Pool, folgen ihr alle daraus entstandenen Aufgaben.
+            // Kommt sie aus einem Pool heraus, gehen die Aufgaben aus dem alten Spiegel-Pool zurück in die Liste.
+            if (oldMirror != null && taskPoolFor(list[i]) == null) {
+                for (k in tasks.indices) {
+                    val t = tasks[k]
+                    if (t.templateId == cardId && t.poolId == oldMirror) tasks[k] = t.copy(poolId = null, sortKey = topKey(false, null))
+                }
+            }
+            syncTemplateTasks()
+        }
         save()
     }
 
