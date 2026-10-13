@@ -151,6 +151,9 @@ fun CardList(vm: MainViewModel, forTemplates: Boolean, poolId: Long?, modifier: 
         passed = passed && newTop < layout.viewportEndOffset - margin && newTop + cur.size > layout.viewportStartOffset + margin
         if (passed) {
             hoverPool = null
+            // Die Liste hält sonst ihre oberste sichtbare Karte fest – ist das die gezogene oder ihr Nachbar,
+            // springt sie beim Tausch mit und die Karte rutscht aus dem Bild. Also die Position beibehalten.
+            listState.requestScrollToItem(listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset)
             working.add(nIdx, working.removeAt(from))
         }
     }
