@@ -1,5 +1,15 @@
 package de.produktivitaet.app
 
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.withFrameNanos
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.platform.LocalDensity
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
@@ -78,7 +88,13 @@ fun CardList(vm: MainViewModel, forTemplates: Boolean, poolId: Long?, modifier: 
     // Ziehen
     val working = remember { mutableStateListOf<ListEntry>() }
     var draggingKey by remember { mutableStateOf<String?>(null) }
-    var dragOffset by remember { mutableFloatStateOf(0f) }
+    // Sichtbare Oberkante der gezogenen Karte (Koordinaten der Liste) und Griffpunkt darin.
+    var visualTop by remember { mutableFloatStateOf(0f) }
+    var grabY by remember { mutableFloatStateOf(0f) }
+    var dragDistance by remember { mutableFloatStateOf(0f) }
+    // Zähler je Pool: springt hoch, wenn eine Karte hineingelegt wurde (löst die Animation aus).
+    val poolPulses = remember { mutableStateMapOf<Long, Int>() }
+    val density = LocalDensity.current
     var hoverPool by remember { mutableStateOf<Long?>(null) }
     var moved by remember { mutableStateOf(false) }
     // Zeitpunkt des letzten Loslassens: verhindert, dass ein Pool nach langem Drücken aufgeht.
@@ -95,45 +111,41 @@ fun CardList(vm: MainViewModel, forTemplates: Boolean, poolId: Long?, modifier: 
     fun isPinnedKey(key: String): Boolean =
         !forTemplates && key.startsWith("t") && store.findTask(key.drop(1).toLong())?.let { store.isPinned(it) } == true
 
+    /**
+     * Tauscht die gezogene Karte mit ihrem Nachbarn, sobald ihre Mitte näher an dem Platz liegt,
+     * den sie nach dem Tausch hätte – so klappt es auch mit unterschiedlich großen Karten.
+     * Über einem Pool: in der Mitte hineinlegen, getauscht wird erst auf der anderen Seite.
+     */
     fun onDragMove() {
         val key = draggingKey ?: return
-        val layout = listState.layoutInfo
-        val info = layout.visibleItemsInfo
+        val info = listState.layoutInfo.visibleItemsInfo
         val cur = info.firstOrNull { it.key == key } ?: return
-        // Am Rand mitscrollen.
-        val center = cur.offset + dragOffset + cur.size / 2f
-        val edge = 90f
-        if (center > layout.viewportEndOffset - edge) {
-            dragOffset += listState.dispatchRawDelta(18f)
-        } else if (center < layout.viewportStartOffset + edge) {
-            dragOffset += listState.dispatchRawDelta(-18f)
-        }
-        val c = cur.offset + dragOffset + cur.size / 2f
-        val target = info.firstOrNull {
-            val k = it.key as? String
-            k != null && k != key && (k.startsWith("t") || k.startsWith("p")) && c >= it.offset && c <= it.offset + it.size
-        }
-        if (target == null) {
+        val from = working.indexOfFirst { it.key == key }
+        // Erst weitermachen, wenn die Liste den letzten Tausch umgesetzt hat (Index 0 = Kopfzeile).
+        if (from < 0 || cur.index != from + 1) return
+        val c = visualTop + cur.size / 2f
+        val oldCenter = cur.offset + cur.size / 2f
+        val down = c > oldCenter
+        val nIdx = if (down) from + 1 else from - 1
+        val neighbor = working.getOrNull(nIdx)
+        val n = neighbor?.let { nb -> info.firstOrNull { it.key == nb.key } }
+        if (neighbor == null || n == null) {
             hoverPool = null
             return
         }
-        val targetKey = target.key as String
-        val from = working.indexOfFirst { it.key == key }
-        val to = working.indexOfFirst { it.key == targetKey }
-        // Karte über einem Pool: in der Mitte hineinlegen; getauscht wird erst, wenn sie
-        // auf der anderen Seite wieder herauskommt – sonst springt sie vorher am Pool vorbei.
-        if (key.startsWith("t") && targetKey.startsWith("p") && !isPinnedKey(key)) {
-            val rel = (c - target.offset) / target.size
-            val passed = if (from < to) rel > 0.78f else rel < 0.22f
-            if (!passed) {
-                hoverPool = if (rel in 0.22f..0.78f) targetKey.drop(1).toLong() else null
-                return
-            }
+        val newCenter = if (down) n.offset + n.size - cur.size / 2f else n.offset + cur.size / 2f
+        val mid = (oldCenter + newCenter) / 2f
+        var passed = if (down) c > mid else c < mid
+        if (key.startsWith("t") && neighbor is ListEntry.Folder && !isPinnedKey(key)) {
+            val rel = (c - n.offset) / n.size
+            hoverPool = if (rel in 0.2f..0.8f) neighbor.pool.id else null
+            passed = passed && (if (down) rel > 0.8f else rel < 0.2f)
+        } else {
+            hoverPool = null
         }
-        hoverPool = null
-        if (from >= 0 && to >= 0) {
-            working.add(to, working.removeAt(from))
-            dragOffset += cur.offset - target.offset
+        if (passed) {
+            hoverPool = null
+            working.add(nIdx, working.removeAt(from))
         }
     }
 
@@ -145,14 +157,38 @@ fun CardList(vm: MainViewModel, forTemplates: Boolean, poolId: Long?, modifier: 
             when {
                 !moved && poolId != null && key.startsWith("t") && !isPinnedKey(key) ->
                     toRemoveFromPool = (if (forTemplates) store.templates else store.tasks).firstOrNull { it.id == id }
-                pool != null -> store.moveToPool(forTemplates, id, pool)
+                pool != null -> {
+                    store.moveToPool(forTemplates, id, pool)
+                    poolPulses[pool] = (poolPulses[pool] ?: 0) + 1
+                }
                 moved -> store.reorder(forTemplates, working.toList())
             }
         }
         draggingKey = null
         hoverPool = null
-        dragOffset = 0f
         lastDragEnd[0] = System.currentTimeMillis()
+    }
+
+    // Beim Ziehen am oberen oder unteren Rand automatisch mitscrollen – auch wenn der Finger stillhält.
+    LaunchedEffect(draggingKey) {
+        if (draggingKey == null) return@LaunchedEffect
+        val edge = with(density) { 80.dp.toPx() }
+        val maxSpeed = with(density) { 16.dp.toPx() }
+        while (true) {
+            withFrameNanos { }
+            if (draggingKey == null) break
+            val layout = listState.layoutInfo
+            val finger = visualTop + grabY
+            val start = layout.viewportStartOffset + edge
+            val end = layout.viewportEndOffset - edge
+            val speed = when {
+                finger > end -> maxSpeed * ((finger - end) / edge).coerceIn(0.15f, 1f)
+                finger < start -> -maxSpeed * ((start - finger) / edge).coerceIn(0.15f, 1f)
+                else -> 0f
+            }
+            if (speed != 0f) listState.dispatchRawDelta(speed)
+            onDragMove()
+        }
     }
 
     Column(modifier) {
@@ -195,27 +231,41 @@ fun CardList(vm: MainViewModel, forTemplates: Boolean, poolId: Long?, modifier: 
                 val itemModifier = Modifier
                     .zIndex(if (isDragged) 1f else 0f)
                     .graphicsLayer {
-                        translationY = if (isDragged) dragOffset else 0f
-                        val s = if (isDragged) 1.03f else 1f
+                        if (isDragged) {
+                            val off = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.key == entry.key }?.offset
+                            translationY = if (off != null) visualTop - off else 0f
+                        }
+                        // Über einem Pool wird die Karte kleiner – sie "fällt" gleich hinein.
+                        val s = if (!isDragged) 1f else if (hoverPool != null) 0.9f else 1.03f
                         scaleX = s
                         scaleY = s
+                        alpha = if (isDragged && hoverPool != null) 0.85f else 1f
                     }
                     .then(if (isDragged) Modifier else Modifier.animateItem())
                     .pointerInput(entry.key, searching) {
                         if (searching) return@pointerInput
                         detectDragGesturesAfterLongPress(
-                            onDragStart = {
+                            onDragStart = { pos ->
                                 working.clear()
                                 working.addAll(store.entries(forTemplates, poolId))
+                                val layout = listState.layoutInfo
+                                visualTop = layout.visibleItemsInfo.firstOrNull { it.key == entry.key }?.offset?.toFloat() ?: 0f
+                                grabY = pos.y
+                                dragDistance = 0f
                                 draggingKey = entry.key
-                                dragOffset = 0f
                                 moved = false
                                 hoverPool = null
                             },
                             onDrag = { change, amount ->
                                 change.consume()
-                                dragOffset += amount.y
-                                if (abs(dragOffset) > viewConfiguration.touchSlop) moved = true
+                                val layout = listState.layoutInfo
+                                // Finger bleibt im sichtbaren Bereich der Liste.
+                                visualTop = (visualTop + amount.y).coerceIn(
+                                    layout.viewportStartOffset - grabY,
+                                    layout.viewportEndOffset - grabY,
+                                )
+                                dragDistance += abs(amount.y)
+                                if (dragDistance > viewConfiguration.touchSlop) moved = true
                                 onDragMove()
                             },
                             onDragEnd = { finishDrag() },
@@ -228,6 +278,7 @@ fun CardList(vm: MainViewModel, forTemplates: Boolean, poolId: Long?, modifier: 
                             pool = entry.pool,
                             count = store.poolSize(entry.pool),
                             highlighted = hoverPool == entry.pool.id,
+                            pulse = poolPulses[entry.pool.id] ?: 0,
                             onOpen = {
                                 if (draggingKey == null && System.currentTimeMillis() - lastDragEnd[0] > 400) {
                                     vm.open(Screen.PoolView(entry.pool.id))
@@ -447,18 +498,44 @@ private fun PoolCard(
     pool: Pool,
     count: Int,
     highlighted: Boolean,
+    pulse: Int,
     onOpen: () -> Unit,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
     mirrored: Boolean,
 ) {
     val fg = onColor(areaColor(poolKey(pool.id), Black))
+    // Karte schwebt darüber: Pool wird etwas größer und leuchtet.
+    val hoverScale by animateFloatAsState(if (highlighted) 1.06f else 1f, spring(dampingRatio = 0.5f, stiffness = 500f), label = "poolHover")
+    val hoverGlow by animateFloatAsState(if (highlighted) 1f else 0f, tween(150), label = "poolGlow")
+    // Karte hineingelegt: kurzes Aufploppen mit Nachleuchten.
+    val pulseScale = remember { Animatable(1f) }
+    val pulseGlow = remember { Animatable(0f) }
+    LaunchedEffect(pulse) {
+        if (pulse == 0) return@LaunchedEffect
+        launch {
+            pulseGlow.snapTo(1f)
+            pulseGlow.animateTo(0f, tween(700))
+        }
+        pulseScale.animateTo(1.12f, tween(110))
+        pulseScale.animateTo(1f, spring(dampingRatio = 0.35f, stiffness = 300f))
+    }
+    val glow = maxOf(hoverGlow, pulseGlow.value)
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .graphicsLayer {
+                val s = hoverScale * pulseScale.value
+                scaleX = s
+                scaleY = s
+            }
             .decoArea(poolKey(pool.id), CardShape, Black)
             .clip(CardShape)
-            .border(if (highlighted) 3.dp else 1.dp, if (highlighted) LightBlue else fg, CardShape)
+            .drawWithContent {
+                drawContent()
+                if (glow > 0f) drawRect(LightBlue.copy(alpha = 0.22f * glow))
+            }
+            .border(1.dp + 2.dp * glow, lerp(fg, LightBlue, glow), CardShape)
             .clickable(onClick = onOpen)
             .padding(start = 16.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
