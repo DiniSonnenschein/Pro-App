@@ -118,7 +118,8 @@ fun CardList(vm: MainViewModel, forTemplates: Boolean, poolId: Long?, modifier: 
      */
     fun onDragMove() {
         val key = draggingKey ?: return
-        val info = listState.layoutInfo.visibleItemsInfo
+        val layout = listState.layoutInfo
+        val info = layout.visibleItemsInfo
         val cur = info.firstOrNull { it.key == key } ?: return
         val from = working.indexOfFirst { it.key == key }
         // Erst weitermachen, wenn die Liste den letzten Tausch umgesetzt hat (Index 0 = Kopfzeile).
@@ -143,6 +144,11 @@ fun CardList(vm: MainViewModel, forTemplates: Boolean, poolId: Long?, modifier: 
         } else {
             hoverPool = null
         }
+        // Der neue Platz muss im Bild liegen: Rutscht er aus der Liste heraus, verwirft die Liste
+        // die Karte und das Ziehen bricht ab. Dann lieber warten, bis das Mitscrollen ihn hereinholt.
+        val newTop = if (down) n.offset + n.size - cur.size else n.offset
+        val margin = 8f
+        passed = passed && newTop < layout.viewportEndOffset - margin && newTop + cur.size > layout.viewportStartOffset + margin
         if (passed) {
             hoverPool = null
             working.add(nIdx, working.removeAt(from))
@@ -181,10 +187,18 @@ fun CardList(vm: MainViewModel, forTemplates: Boolean, poolId: Long?, modifier: 
             val finger = visualTop + grabY
             val start = layout.viewportStartOffset + edge
             val end = layout.viewportEndOffset - edge
-            val speed = when {
+            var speed = when {
                 finger > end -> maxSpeed * ((finger - end) / edge).coerceIn(0.15f, 1f)
                 finger < start -> -maxSpeed * ((start - finger) / edge).coerceIn(0.15f, 1f)
                 else -> 0f
+            }
+            // Nie so weit scrollen, dass der Platz der gezogenen Karte ganz aus dem Bild rutscht.
+            val cur = layout.visibleItemsInfo.firstOrNull { it.key == draggingKey }
+            val margin = 8f
+            speed = when {
+                cur == null -> 0f
+                speed > 0f -> minOf(speed, cur.offset + cur.size - layout.viewportStartOffset - margin).coerceAtLeast(0f)
+                else -> maxOf(speed, cur.offset - layout.viewportEndOffset + margin).coerceAtMost(0f)
             }
             if (speed != 0f) listState.dispatchRawDelta(speed)
             onDragMove()
